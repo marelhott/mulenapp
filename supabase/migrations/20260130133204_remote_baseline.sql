@@ -1,0 +1,2 @@
+-- Remote baseline migration placeholder.
+-- This file mirrors an already-applied historical migration in the linked Supabase project.

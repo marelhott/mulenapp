@@ -1,0 +1,22 @@
+{
+  "name": "@mulen/api",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.0.0",
+    "@mulen/shared": "file:../../packages/shared",
+    "@supabase/supabase-js": "^2.106.0",
+    "dotenv": "^16.6.1",
+    "fastify": "^5.2.1",
+    "tsx": "^4.20.0"
+  },
+  "devDependencies": {
+    "typescript": "~5.8.2"
+  }
+}

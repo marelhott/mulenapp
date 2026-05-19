@@ -1,0 +1,13 @@
+node_modules
+dist
+.env
+.env.local
+.DS_Store
+*.log
+apps/*/.vite
+.vercel
+.playwright-mcp
+design-backups
+*.png
+apps/api/.data
+supabase/.temp

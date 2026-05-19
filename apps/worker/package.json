@@ -1,0 +1,19 @@
+{
+  "name": "@mulen/worker",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/worker.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "@mulen/shared": "file:../../packages/shared",
+    "dotenv": "^16.6.1",
+    "tsx": "^4.20.0"
+  },
+  "devDependencies": {
+    "typescript": "~5.8.2"
+  }
+}

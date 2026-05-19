@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: mulen-api
+    runtime: node
+    rootDir: .
+    buildCommand: npm install && npm run build -w @mulen/shared && npm run build -w @mulen/api
+    startCommand: node apps/api/dist/server.js
+    envVars:
+      - key: PORT
+        value: 4000
+      - key: HOST
+        value: 0.0.0.0
+
+  - type: worker
+    name: mulen-worker
+    runtime: node
+    rootDir: .
+    buildCommand: npm install && npm run build -w @mulen/shared && npm run build -w @mulen/worker
+    startCommand: node apps/worker/dist/worker.js
+    envVars:
+      - key: MULEN_API_URL
+        value: https://mulen-api.onrender.com
+      - key: WORKER_POLL_MS
+        value: 3000

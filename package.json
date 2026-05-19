@@ -1,0 +1,23 @@
+{
+  "name": "mulen",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @mulen/web",
+    "dev:web": "npm run dev -w @mulen/web",
+    "dev:api": "npm run dev -w @mulen/api",
+    "dev:worker": "npm run dev -w @mulen/worker",
+    "typecheck": "npm run typecheck -w @mulen/shared && npm run typecheck -w @mulen/api && npm run typecheck -w @mulen/worker && npm run typecheck -w @mulen/web",
+    "build": "npm run build -w @mulen/shared && npm run build -w @mulen/api && npm run build -w @mulen/worker && npm run build -w @mulen/web",
+    "lint": "npm run lint --workspaces --if-present"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "typescript": "~5.8.2"
+  }
+}
