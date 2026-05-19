@@ -1,5 +1,7 @@
 import { Camera, ChartNoAxesCombined, Grid3X3, Layers3, ListTree, Maximize2, User } from 'lucide-react';
 import type { NanoRoute } from '../../types/nano';
+import { RailHoverInfo } from './RailHoverInfo';
+import { RAIL_INFO } from './railInfo';
 
 const ITEMS: Array<{
   id: NanoRoute;
@@ -22,20 +24,22 @@ export function ModuleRail(props: { activeRoute: NanoRoute; onSelectRoute: (rout
       {ITEMS.map((item) => {
         const Icon = item.icon;
         const isActive = item.id === props.activeRoute;
+        const info = RAIL_INFO[item.id];
 
         return (
-          <button
-            key={item.id}
-            type="button"
-            title={item.label}
-            aria-label={item.label}
-            onClick={() => props.onSelectRoute(item.id)}
-            className={isActive ? 'nano-rail-item active' : 'nano-rail-item'}
-          >
-            <Icon size={13} strokeWidth={1.6} />
-            <span>{item.shortLabel}</span>
-            {isActive ? <i aria-hidden="true" /> : null}
-          </button>
+          <div className="nano-rail-item-wrap" key={item.id}>
+            <button
+              type="button"
+              aria-label={item.label}
+              onClick={() => props.onSelectRoute(item.id)}
+              className={isActive ? 'nano-rail-item active' : 'nano-rail-item'}
+            >
+              <Icon size={13} strokeWidth={1.6} />
+              <span>{item.shortLabel}</span>
+              {isActive ? <i aria-hidden="true" /> : null}
+            </button>
+            <RailHoverInfo info={info} />
+          </div>
         );
       })}
     </aside>

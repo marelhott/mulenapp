@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ImagePlus, UserRound } from 'lucide-react';
 import type { Asset, ImageVersion } from '@mulen/shared';
+import { AssetLibraryPopover } from '../../project/AssetLibraryPopover';
 
 type HeadSwapPanelProps = {
   sourceAsset?: Asset;
@@ -8,8 +9,11 @@ type HeadSwapPanelProps = {
   hairMode: 'source' | 'target' | 'auto';
   resultVersions: ImageVersion[];
   versionNotes: Record<string, string>;
+  libraryAssets: Asset[];
   onUploadSource: (file: File) => void;
   onUploadTarget: (file: File) => void;
+  onSelectSourceAsset: (asset: Asset) => void;
+  onSelectTargetAsset: (asset: Asset) => void;
   onHairModeChange: (value: 'source' | 'target' | 'auto') => void;
   onNoteChange: (versionId: string, value: string) => void;
   onRefineVariant: (versionId: string) => void;
@@ -17,7 +21,14 @@ type HeadSwapPanelProps = {
   isGenerating: boolean;
 };
 
-function UploadBox(props: { title: string; subtitle: string; onUpload: (file: File) => void; asset?: Asset }) {
+function UploadBox(props: {
+  title: string;
+  subtitle: string;
+  onUpload: (file: File) => void;
+  onSelectAsset: (asset: Asset) => void;
+  libraryAssets: Asset[];
+  asset?: Asset;
+}) {
   const [dragging, setDragging] = useState(false);
 
   const processFile = (fileList: FileList | File[]) => {
@@ -26,42 +37,50 @@ function UploadBox(props: { title: string; subtitle: string; onUpload: (file: Fi
   };
 
   return (
-    <label>
-      {props.title}
-      <div
-        className={dragging ? 'upload-slot dragging mini' : 'upload-slot mini'}
-        onDragLeave={() => setDragging(false)}
-        onDragOver={(event) => {
-          event.preventDefault();
-          setDragging(true);
-        }}
-        onDrop={(event) => {
-          event.preventDefault();
-          setDragging(false);
-          if (event.dataTransfer.files) processFile(event.dataTransfer.files);
-        }}
-      >
-        <input
-          accept="image/*"
-          className="upload-input"
-          onChange={(event) => {
-            if (event.target.files) processFile(event.target.files);
+    <AssetLibraryPopover
+      assets={props.libraryAssets}
+      selectedAssetId={props.asset?.id}
+      onSelectAsset={props.onSelectAsset}
+      onUploadFile={props.onUpload}
+      placement="left"
+    >
+      <label>
+        {props.title}
+        <div
+          className={dragging ? 'upload-slot dragging mini' : 'upload-slot mini'}
+          onDragLeave={() => setDragging(false)}
+          onDragOver={(event) => {
+            event.preventDefault();
+            setDragging(true);
           }}
-          type="file"
-        />
-        {props.asset ? (
-          <div className="inline-asset-preview">
-            <img alt={props.subtitle} src={props.asset.url} />
-            <span>{props.subtitle}</span>
-          </div>
-        ) : (
-          <>
-            <ImagePlus size={16} />
-            <span>{props.subtitle}</span>
-          </>
-        )}
-      </div>
-    </label>
+          onDrop={(event) => {
+            event.preventDefault();
+            setDragging(false);
+            if (event.dataTransfer.files) processFile(event.dataTransfer.files);
+          }}
+        >
+          <input
+            accept="image/*"
+            className="upload-input"
+            onChange={(event) => {
+              if (event.target.files) processFile(event.target.files);
+            }}
+            type="file"
+          />
+          {props.asset ? (
+            <div className="inline-asset-preview">
+              <img alt={props.subtitle} src={props.asset.url} />
+              <span>{props.subtitle}</span>
+            </div>
+          ) : (
+            <>
+              <ImagePlus size={16} />
+              <span>{props.subtitle}</span>
+            </>
+          )}
+        </div>
+      </label>
+    </AssetLibraryPopover>
   );
 }
 
@@ -77,12 +96,16 @@ export function HeadSwapPanel(props: HeadSwapPanelProps) {
       <p className="nano-module-kicker">Parallel comparison</p>
       <UploadBox
         asset={props.sourceAsset}
+        libraryAssets={props.libraryAssets}
+        onSelectAsset={props.onSelectSourceAsset}
         onUpload={props.onUploadSource}
         subtitle={props.sourceAsset ? 'Zdrojova identita nactena' : 'Nahraj source face / head'}
         title="Zdrojova hlava"
       />
       <UploadBox
         asset={props.targetAsset}
+        libraryAssets={props.libraryAssets}
+        onSelectAsset={props.onSelectTargetAsset}
         onUpload={props.onUploadTarget}
         subtitle={props.targetAsset ? 'Cilova scena nactena' : 'Nahraj target image'}
         title="Cilovy obrazek"

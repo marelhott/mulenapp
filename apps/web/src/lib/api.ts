@@ -59,6 +59,10 @@ export const api = {
     outputCount: number;
     aspectRatio: 'original' | 'square' | 'portrait' | 'landscape';
     polishMode: 'focused' | 'balanced' | 'bold';
+    promptMode?: 'simple' | 'interpretation';
+    simpleLinkMode?: 'style' | 'merge' | 'object' | null;
+    advancedVariant?: 'A' | 'B' | 'C';
+    faceIdentityMode?: boolean;
     sourceVersionId?: string;
   }) {
     return requestJson<GenerationJob>('/jobs', {
@@ -90,6 +94,12 @@ export const api = {
     workflow?: string;
   }) {
     return requestJson<{ ok: true; snapshot: WorkspaceSnapshot }>('/exports', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+  enhancePrompt(input: { prompt: string }) {
+    return requestJson<{ ok: true; prompt: string }>('/prompt/enhance', {
       method: 'POST',
       body: JSON.stringify(input),
     });

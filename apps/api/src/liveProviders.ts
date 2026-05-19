@@ -2,6 +2,30 @@ import type { Asset, EditStep, GenerationJob, ImageVersion, ModelRun, QualityEva
 import { canUseSupabaseStorage, persistGeneratedImageMetadata, uploadDataUrlToSupabase } from './supabaseStorage.js';
 
 const GEMINI_IMAGE_MODEL = 'gemini-3.1-flash-image-preview';
+const GEMINI_TEXT_MODEL = 'gemini-2.5-flash';
+const PROMPT_ENHANCER_SYSTEM_PROMPT = `You are a strict and disciplined AI prompt enhancer for image generation.
+
+Your task is to rewrite the user's prompt so it is clearer, more precise, and better suited for AI image generation — WITHOUT changing its meaning in any way.
+
+CORE RULE:
+Do NOT add anything that the user did not explicitly request.
+
+RULES:
+- Preserve the original intent 100% exactly
+- Do not add new objects, styles, lighting, mood, composition, or details
+- Do not be creative or imaginative
+- Do not expand the prompt beyond what is necessary
+- Only clarify wording and remove ambiguity
+- Replace vague phrases like "better" or "nicer" with neutral quality improvements like "improved quality" or "cleaner details"
+- If the user says "keep", "preserve", "do not change", or similar, it must be explicitly respected
+- If it is a portrait, preserve identity unless explicitly told otherwise
+- Keep the output minimal, clean, and technically precise
+
+OUTPUT FORMAT:
+Return only the improved prompt.
+No explanations.
+No comments.
+No markdown.`;
 
 function createId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -51,6 +75,47 @@ async function callGeminiImage(request: Record<string, unknown>, apiKey: string)
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(request),
+  });
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(data?.error?.message || response.statusText || 'Gemini API error');
+  }
+
+  return data;
+}
+
+function extractGeminiText(data: any) {
+  const parts = (data?.candidates || []).flatMap((candidate: any) => candidate?.content?.parts || []);
+  const text = parts
+    .map((part: any) => String(part?.text || ''))
+    .join('\n')
+    .trim();
+  return text || null;
+}
+
+async function callGeminiText(prompt: string, apiKey: string) {
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_TEXT_MODEL)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      systemInstruction: {
+        parts: [{ text: PROMPT_ENHANCER_SYSTEM_PROMPT }],
+      },
+      contents: [
+        {
+          parts: [{ text: prompt }],
+        },
+      ],
+      generationConfig: {
+        temperature: 0.1,
+        topP: 0.1,
+        maxOutputTokens: 300,
+      },
+    }),
   });
   const data = await response.json().catch(() => ({}));
 
@@ -121,6 +186,25 @@ function nextPhotoEditLabel(snapshot: WorkspaceSnapshot, outputCount: number, in
 
 export function canRunLivePhotoDirector() {
   return Boolean(getGeminiApiKey());
+}
+
+export function canRunPromptEnhancer() {
+  return Boolean(getGeminiApiKey());
+}
+
+export async function enhancePromptText(prompt: string) {
+  const apiKey = getGeminiApiKey();
+  if (!apiKey) {
+    throw new Error('Gemini API key is not configured.');
+  }
+
+  const response = await callGeminiText(prompt, apiKey);
+  const enhancedPrompt = extractGeminiText(response);
+  if (!enhancedPrompt) {
+    throw new Error('Prompt enhancer did not return text.');
+  }
+
+  return enhancedPrompt;
 }
 
 export async function runLivePhotoDirectorJob(snapshot: WorkspaceSnapshot, job: GenerationJob): Promise<WorkspaceSnapshot> {

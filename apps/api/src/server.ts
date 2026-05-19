@@ -4,6 +4,7 @@ import cors from '@fastify/cors';
 import type { Asset, GenerationJob, MulenModule } from '@mulen/shared';
 import { mockWorkspaceSnapshot } from '@mulen/shared';
 import { processJob, processQueuedJobsOnce } from './mockEngine.js';
+import { canRunPromptEnhancer, enhancePromptText } from './liveProviders.js';
 import { canUseMulenPersistence, getMulenPersistencePublicStatus } from './mulenPersistence.js';
 import { canUseSupabaseStorage, persistSavedImageMetadata, uploadDataUrlToSupabase } from './supabaseStorage.js';
 import { readStore, resetStore, updateStore } from './store.js';
@@ -48,6 +49,10 @@ type CreateExportBody = {
   format?: 'png' | 'jpg' | 'pdf' | 'html';
   useCase?: 'web' | 'social' | 'print' | 'archive';
   workflow?: string;
+};
+
+type EnhancePromptBody = {
+  prompt?: string;
 };
 
 function createId(prefix: string) {
@@ -253,6 +258,30 @@ app.post('/assets/upload-url', async () => ({
   expiresIn: 900,
   mode: 'mock',
 }));
+
+app.post<{ Body: EnhancePromptBody }>('/prompt/enhance', async (request, reply) => {
+  const prompt = String(request.body?.prompt || '');
+  if (!prompt.trim()) {
+    return reply.code(400).send({ error: 'Prompt is empty.' });
+  }
+
+  if (!canRunPromptEnhancer()) {
+    return reply.code(503).send({ error: 'Prompt enhancer is not available.' });
+  }
+
+  try {
+    const enhancedPrompt = await enhancePromptText(prompt);
+    return {
+      ok: true,
+      prompt: enhancedPrompt,
+    };
+  } catch (error) {
+    request.log.error({ err: error }, 'Prompt enhancer failed');
+    return reply.code(502).send({
+      error: error instanceof Error ? error.message : 'Prompt enhancer failed.',
+    });
+  }
+});
 
 app.post<{ Body: CreateJobBody }>('/jobs', async (request, reply) => {
   const body = request.body ?? {};

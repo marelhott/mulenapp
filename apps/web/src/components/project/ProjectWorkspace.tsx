@@ -1,5 +1,5 @@
-import { startTransition, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { FolderOpen, PanelRight, Wand2 } from 'lucide-react';
+import { startTransition, useEffect, useRef, useState } from 'react';
+import { PanelRight } from 'lucide-react';
 import type {
   Asset,
   EditStep,
@@ -12,15 +12,9 @@ import type {
   VisualCanon,
   WorkspaceSnapshot,
 } from '@mulen/shared';
-import { AiUpscalerPanel } from '../modules/ai-upscaler/AiUpscalerPanel';
-import { HeadSwapPanel } from '../modules/headswap/HeadSwapPanel';
-import { InfographicPanel } from '../modules/infographic-generator/InfographicPanel';
-import { MultiAnglePanel } from '../modules/multi-angle-reframe/MultiAnglePanel';
-import { PhotoDirectorPanel } from '../modules/photo-director/PhotoDirectorPanel';
-import { VariantLabPanel } from '../modules/variant-lab/VariantLabPanel';
-import { VisualGuidePanel } from '../modules/visual-guide/VisualGuidePanel';
 import { OutputGallerySection } from './OutputGallery';
 import { TimelinePanel } from './Timeline';
+import { AssetLibraryPopover } from './AssetLibraryPopover';
 import type { NanoRoute } from '../../types/nano';
 import { getNanoRouteLabel, mapNanoRouteToModule } from '../../types/nano';
 import { api, fileToDataUrl, type ApiConfig, waitForJob } from '../../lib/api';
@@ -48,6 +42,8 @@ type WorkspaceState = {
   headswapHairMode: 'source' | 'target' | 'auto';
   headswapSourceAssetId?: string;
   headswapTargetAssetId?: string;
+  styleSlotAssetId?: string;
+  brandSlotAssetId?: string;
   headswapNotes: Record<string, string>;
   visualGuidePrompt: string;
   visualGuideStepCount: number;
@@ -66,6 +62,15 @@ type WorkspaceState = {
   styleTransferPrompt: string;
   styleTransferPreserveComposition: boolean;
 };
+
+type SavedPrompt = {
+  id: string;
+  name: string;
+  text: string;
+  createdAt: string;
+};
+
+const SAVED_PROMPTS_STORAGE_KEY = 'mulen-saved-prompts';
 
 const MOCK_GENERATED_IMAGES = [
   'https://images.unsplash.com/photo-1511499767150-a48a237f0083?auto=format&fit=crop&w=1200&q=80',
@@ -91,8 +96,8 @@ function createWorkspaceState(snapshot: WorkspaceSnapshot): WorkspaceState {
       referenceAssetIds: [...snapshot.visualCanon.referenceAssetIds],
     },
     project: { ...snapshot.project },
-    photoDirectorInstruction: 'Zlepsi svetlo, nech produkt stejny a pozadi udelej cistsi.',
-    photoDirectorLockedText: 'produkt, logo, hlavni kompozice',
+    photoDirectorInstruction: '',
+    photoDirectorLockedText: '',
     photoDirectorOutputCount: 2,
     photoDirectorAspectRatio: 'original',
     photoDirectorPolishMode: 'focused',
@@ -102,6 +107,7 @@ function createWorkspaceState(snapshot: WorkspaceSnapshot): WorkspaceState {
     multiAngleShotCount: 10,
     multiAnglePrecision: 'bezpecna',
     headswapHairMode: 'auto',
+    styleSlotAssetId: snapshot.visualCanon.referenceAssetIds.find((assetId) => assetId !== snapshot.project.originalAssetId),
     headswapTargetAssetId: snapshot.project.originalAssetId,
     headswapNotes: {},
     visualGuidePrompt: 'Udelej mi navod jak uvarit pho.',
@@ -137,6 +143,10 @@ function MainCanvas(props: {
   const activeVersion =
     props.snapshot.versions.find((version) => version.id === props.snapshot.project.activeVersionId) ?? props.snapshot.versions[0];
   const activeAsset = activeVersion ? getAsset(props.snapshot, activeVersion) : undefined;
+  const shouldRenderStageAsset =
+    props.activeRoute !== 'mulen' &&
+    !!activeAsset &&
+    (activeAsset.kind === 'generated' || activeAsset.kind === 'export' || activeVersion?.module === 'infographic-generator');
   const stageConfig = getRouteStageConfig(props.snapshot, props.activeRoute, activeVersion);
   const stageSupplement = getRouteStageSupplement(props.snapshot, props.activeRoute, activeVersion);
   const infographicLayout = activeAsset?.metadata?.layout as
@@ -179,37 +189,7 @@ function MainCanvas(props: {
         </div>
       ) : (
         <div className="image-stage nano-image-stage">
-          {stageConfig.badges.length > 0 ? (
-            <div className="nano-stage-badges" aria-label="Stage badges">
-              {stageConfig.badges.map((badge) => (
-                <span key={badge}>{badge}</span>
-              ))}
-            </div>
-          ) : null}
-          {stageSupplement ? (
-            <div className="nano-stage-sidecar" aria-label="Stage context">
-              {stageSupplement.cards.map((card) => (
-                <div className="nano-stage-sidecard" key={card.title}>
-                  <strong>{card.title}</strong>
-                  {card.previewUrl ? (
-                    <div className="nano-stage-preview">
-                      <img alt={card.title} src={card.previewUrl} />
-                    </div>
-                  ) : null}
-                  {card.items?.length ? (
-                    <div className="nano-stage-items">
-                      {card.items.map((item) => (
-                        <span key={item}>{item}</span>
-                      ))}
-                    </div>
-                  ) : null}
-                  {card.value ? <b>{card.value}</b> : null}
-                  {card.subtitle ? <p>{card.subtitle}</p> : null}
-                </div>
-              ))}
-            </div>
-          ) : null}
-          {activeAsset ? (
+          {shouldRenderStageAsset && activeAsset ? (
             <>
               <img alt={activeVersion?.label ?? 'Active version'} src={activeAsset.url} />
               <div className="nano-stage-footer">
@@ -218,15 +198,7 @@ function MainCanvas(props: {
               </div>
             </>
           ) : (
-            <div className="nano-empty-state">
-              <div className="nano-empty-mark" aria-hidden="true">
-                {Array.from({ length: 17 }).map((_, index) => (
-                  <span key={index} />
-                ))}
-              </div>
-              <strong>Zatim zadne vygenerovane obrazky</strong>
-              <p>{stageConfig.emptyMessage}</p>
-            </div>
+            <div className="nano-stage-blank" aria-hidden="true" />
           )}
         </div>
       )}
@@ -516,9 +488,10 @@ function NanoLeftSidebar(props: {
   onInstructionChange: (value: string) => void;
   onLockedTextChange: (value: string) => void;
   onUploadImage: (file: File) => void;
-  onUploadReference: (file: File) => void;
+  onUploadReference: (file: File, slot?: 'style' | 'brand') => void;
   onHeadswapSourceUpload: (file: File) => void;
   onHeadswapTargetUpload: (file: File) => void;
+  onSelectExistingAsset: (asset: Asset, slot: 'input' | 'style' | 'brand' | 'source-face' | 'target-scene') => void;
   onOutputCountChange: (value: number) => void;
   onVariantCountChange: (value: number) => void;
   onVariantIntensityChange: (value: 'jemne' | 'stredne' | 'odvazne') => void;
@@ -540,12 +513,37 @@ function NanoLeftSidebar(props: {
   onInfographicThemeChange: (value: 'light' | 'dark') => void;
   onPrimaryAction: () => void;
   isGenerating: boolean;
+  onEnhancePrompt: () => void;
+  onUndoPromptEnhance: () => void;
+  onOpenSavePrompt: () => void;
+  onSavePrompt: () => void;
+  onLoadPrompt: (text: string) => void;
+  onDeletePrompt: (id: string) => void;
+  onSelectSavedPrompt: (id: string) => void;
+  promptMode: 'simple' | 'interpretation';
+  canEnhancePrompt: boolean;
+  canUndoPromptEnhance: boolean;
+  canSavePrompt: boolean;
+  isEnhancingPrompt: boolean;
+  enhanceError: string | null;
+  savedPrompts: SavedPrompt[];
+  isSavedPromptsOpen: boolean;
+  onToggleSavedPrompts: () => void;
+  isSavePromptOpen: boolean;
+  savedPromptDraftName: string;
+  onSavedPromptDraftNameChange: (value: string) => void;
+  onCloseSavePrompt: () => void;
+  selectedSavedPromptId: string | null;
 }) {
   const referenceAssets = props.snapshot.assets.filter((asset) => asset.kind === 'reference');
   const originalAsset = props.snapshot.assets.find((asset) => asset.id === props.snapshot.project.originalAssetId);
   const headswapSourceAsset = props.snapshot.assets.find((asset) => asset.id === props.snapshot.headswapSourceAssetId);
   const headswapTargetAsset = props.snapshot.assets.find((asset) => asset.id === props.snapshot.headswapTargetAssetId);
+  const styleSlotAsset =
+    props.snapshot.assets.find((asset) => asset.id === props.snapshot.styleSlotAssetId) ?? referenceAssets[0];
+  const brandSlotAsset = props.snapshot.assets.find((asset) => asset.id === props.snapshot.brandSlotAssetId);
   const [dragSection, setDragSection] = useState<'input' | 'style' | 'brand' | null>(null);
+  const promptToolbarRef = useRef<HTMLDivElement | null>(null);
   const route = props.activeRoute;
 
   const handleFile = (fileList: FileList | File[], mode: 'input' | 'style' | 'brand' | 'source-face' | 'target-scene') => {
@@ -560,15 +558,17 @@ function NanoLeftSidebar(props: {
       return;
     }
     if (mode === 'input') props.onUploadImage(file);
-    else props.onUploadReference(file);
+    else props.onUploadReference(file, mode === 'brand' ? 'brand' : 'style');
   };
   const uploadConfigs = getRouteUploadConfigs({
     route,
     originalAsset,
     referenceAssets,
-      lockedCount: props.snapshot.lockedAreas.length,
-      headswapSourceAsset,
-      headswapTargetAsset,
+    lockedCount: props.snapshot.lockedAreas.length,
+    headswapSourceAsset,
+    headswapTargetAsset,
+    styleSlotAsset,
+    brandSlotAsset,
   });
   const commandConfig = getRouteCommandConfig(props.snapshot, route, {
     onOutputCountChange: props.onOutputCountChange,
@@ -586,6 +586,23 @@ function NanoLeftSidebar(props: {
     onInfographicFormatChange: props.onInfographicFormatChange,
     onInfographicThemeChange: props.onInfographicThemeChange,
   });
+  const selectedSavedPrompt =
+    props.savedPrompts.find((prompt) => prompt.id === props.selectedSavedPromptId) ?? props.savedPrompts[0] ?? null;
+
+  useEffect(() => {
+    if ((!props.isSavedPromptsOpen && !props.isSavePromptOpen) || typeof window === 'undefined') return;
+
+    const handlePointerDown = (event: MouseEvent | PointerEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (promptToolbarRef.current?.contains(target)) return;
+      if (props.isSavedPromptsOpen) props.onToggleSavedPrompts();
+      if (props.isSavePromptOpen) props.onCloseSavePrompt();
+    };
+
+    window.addEventListener('pointerdown', handlePointerDown);
+    return () => window.removeEventListener('pointerdown', handlePointerDown);
+  }, [props.isSavedPromptsOpen, props.isSavePromptOpen, props.onToggleSavedPrompts, props.onCloseSavePrompt]);
 
   return (
     <aside className="nano-left-panel">
@@ -620,19 +637,6 @@ function NanoLeftSidebar(props: {
         <div className="nano-prompt-card">
           <div className="nano-prompt-header">
             <strong>{commandConfig.cardTitle}</strong>
-            <div className="nano-prompt-tools">
-              <button type="button">[]</button>
-              <button type="button">{'<>'}</button>
-              <button type="button">
-                <FolderOpen size={12} />
-              </button>
-            </div>
-          </div>
-          <div className="nano-prompt-modes">
-            <button className="active" type="button">
-              {commandConfig.primaryModeLabel}
-            </button>
-            <button type="button">{commandConfig.secondaryModeLabel}</button>
           </div>
           {renderRouteCommandBody({
             route,
@@ -657,22 +661,139 @@ function NanoLeftSidebar(props: {
             onInfographicTopicChange: props.onInfographicTopicChange,
             onInfographicFormatChange: props.onInfographicFormatChange,
             onInfographicThemeChange: props.onInfographicThemeChange,
+            promptMode: props.promptMode,
           })}
+          {isPromptEnhanceableRoute(route) ? (
+            <div className="nano-prompt-enhancer" ref={promptToolbarRef}>
+              <button
+                type="button"
+                className="nano-prompt-toolcell nano-prompt-toolcell-primary"
+                disabled={!props.canEnhancePrompt || props.isEnhancingPrompt}
+                onClick={props.onEnhancePrompt}
+              >
+                {props.isEnhancingPrompt ? 'Vylepsuji prompt...' : 'Vylepsit prompt'}
+              </button>
+              <button
+                type="button"
+                className="nano-prompt-toolcell"
+                disabled={!props.canUndoPromptEnhance}
+                onClick={props.onUndoPromptEnhance}
+              >
+                Vratit zpet
+              </button>
+              <div className="nano-prompt-toolbar-popover">
+                <button
+                  type="button"
+                  className="nano-prompt-toolcell"
+                  disabled={!props.canSavePrompt}
+                  onClick={props.onOpenSavePrompt}
+                >
+                  Ulozit prompt
+                </button>
+                {props.isSavePromptOpen ? (
+                  <div className="nano-prompt-popover nano-prompt-save-popover">
+                    <div className="nano-prompt-popover-head">
+                      <strong>Pojmenovat prompt</strong>
+                    </div>
+                    <input
+                      type="text"
+                      value={props.savedPromptDraftName}
+                      onChange={(event) => props.onSavedPromptDraftNameChange(event.target.value)}
+                      placeholder="Napriklad produktove svetlo"
+                      className="nano-prompt-name-input"
+                    />
+                    <div className="nano-prompt-popover-actions">
+                      <button type="button" className="nano-prompt-popover-button" onClick={props.onSavePrompt}>
+                        Ulozit
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+              <div className="nano-prompt-toolbar-popover">
+                <button type="button" className="nano-prompt-toolcell" onClick={props.onToggleSavedPrompts}>
+                  Moje prompty
+                </button>
+                {props.isSavedPromptsOpen ? (
+                  <div className="nano-prompt-popover nano-prompt-library-popover">
+                    <div className="nano-prompt-library-columns">
+                      <div className="nano-prompt-library-list">
+                        <div className="nano-prompt-popover-head">
+                          <strong>Ulozene prompty</strong>
+                        </div>
+                        {props.savedPrompts.length ? (
+                          props.savedPrompts.map((prompt) => (
+                            <button
+                              type="button"
+                              key={prompt.id}
+                              className={prompt.id === selectedSavedPrompt?.id ? 'nano-prompt-library-item active' : 'nano-prompt-library-item'}
+                              onClick={() => props.onSelectSavedPrompt(prompt.id)}
+                            >
+                              <strong>{prompt.name}</strong>
+                              <span>{new Date(prompt.createdAt).toLocaleDateString('cs-CZ')}</span>
+                            </button>
+                          ))
+                        ) : (
+                          <p className="nano-prompt-dropdown-empty">Zatim zadne ulozene prompty.</p>
+                        )}
+                      </div>
+                      <div className="nano-prompt-library-detail">
+                        {selectedSavedPrompt ? (
+                          <>
+                            <div className="nano-prompt-popover-head">
+                              <strong>{selectedSavedPrompt.name}</strong>
+                            </div>
+                            <pre className="nano-prompt-library-text">{selectedSavedPrompt.text}</pre>
+                            <div className="nano-prompt-popover-actions">
+                              <button
+                                type="button"
+                                className="nano-prompt-popover-button"
+                                onClick={() => props.onLoadPrompt(selectedSavedPrompt.text)}
+                              >
+                                Vlozit
+                              </button>
+                              <button
+                                type="button"
+                                className="nano-prompt-popover-button subtle"
+                                onClick={() => props.onDeletePrompt(selectedSavedPrompt.id)}
+                              >
+                                Smazat
+                              </button>
+                            </div>
+                          </>
+                        ) : (
+                          <p className="nano-prompt-dropdown-empty">Vyberte prompt vlevo.</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+              {props.enhanceError ? <p className="nano-prompt-enhance-error">{props.enhanceError}</p> : null}
+            </div>
+          ) : null}
         </div>
       </section>
 
       <section className="nano-input-sections">
         {uploadConfigs.map((config) => (
           <div key={config.id}>
-            <UploadSection
-              count={config.count}
-              dragging={dragSection === config.dragKey}
-              helper={config.helper}
-              onBrowse={() => document.getElementById(config.id)?.click()}
-              onDropFiles={(files) => handleFile(files, config.mode)}
-              onDragStateChange={(active) => setDragSection(active ? config.dragKey : null)}
-              title={config.title}
-            />
+            <AssetLibraryPopover
+              assets={props.snapshot.assets}
+              selectedAssetId={config.asset?.id}
+              onUploadFile={(file) => handleFile([file], config.mode)}
+              onSelectAsset={(asset) => props.onSelectExistingAsset(asset, config.mode)}
+            >
+              <UploadSection
+                asset={config.asset}
+                count={config.count}
+                dragging={dragSection === config.dragKey}
+                onBrowse={() => document.getElementById(config.id)?.click()}
+                onDropFiles={(files) => handleFile(files, config.mode)}
+                onDragStateChange={(active) => setDragSection(active ? config.dragKey : null)}
+                title={config.title}
+              />
+            </AssetLibraryPopover>
             <input
               id={config.id}
               className="upload-input hidden-upload-input"
@@ -692,8 +813,8 @@ function NanoLeftSidebar(props: {
 function UploadSection(props: {
   title: string;
   count: number;
-  helper: string;
   dragging: boolean;
+  asset?: Asset;
   onBrowse: () => void;
   onDropFiles: (files: FileList) => void;
   onDragStateChange: (active: boolean) => void;
@@ -721,7 +842,6 @@ function UploadSection(props: {
       >
         <span>+</span>
       </button>
-      <p>{props.helper}</p>
     </section>
   );
 }
@@ -894,6 +1014,8 @@ function getRouteUploadConfigs(input: {
   lockedCount: number;
   headswapSourceAsset?: Asset;
   headswapTargetAsset?: Asset;
+  styleSlotAsset?: Asset;
+  brandSlotAsset?: Asset;
 }) {
   const baseStyleHelper = input.referenceAssets[0]?.storagePath ?? 'Stylove reference a look-and-feel';
 
@@ -907,6 +1029,7 @@ function getRouteUploadConfigs(input: {
           title: 'Zdrojova hlava',
           count: input.headswapSourceAsset ? 1 : 0,
           helper: input.headswapSourceAsset?.storagePath ?? 'Nahraj source face / head',
+          asset: input.headswapSourceAsset,
         },
         {
           id: 'nano-target-scene-upload',
@@ -915,6 +1038,7 @@ function getRouteUploadConfigs(input: {
           title: 'Cilovy obrazek',
           count: input.headswapTargetAsset ? 1 : 0,
           helper: input.headswapTargetAsset?.storagePath ?? 'Nahraj target image',
+          asset: input.headswapTargetAsset,
         },
         {
           id: 'nano-headswap-ref-upload',
@@ -922,7 +1046,8 @@ function getRouteUploadConfigs(input: {
           mode: 'style' as const,
           title: 'Reference',
           count: input.referenceAssets.length,
-          helper: baseStyleHelper,
+          helper: input.styleSlotAsset?.storagePath ?? baseStyleHelper,
+          asset: input.styleSlotAsset,
         },
       ];
     case 'reframe':
@@ -941,15 +1066,17 @@ function getRouteUploadConfigs(input: {
           mode: 'style' as const,
           title: 'Prostredi',
           count: input.referenceAssets.length,
-          helper: baseStyleHelper,
+          helper: input.styleSlotAsset?.storagePath ?? baseStyleHelper,
+          asset: input.styleSlotAsset,
         },
         {
           id: 'nano-reframe-brand-upload',
           dragKey: 'brand' as const,
           mode: 'brand' as const,
           title: 'Brand prvky',
-          count: input.lockedCount,
-          helper: 'Logo, material, mistnost nebo produkt ktery musi zustat konzistentni.',
+          count: input.brandSlotAsset ? 1 : input.lockedCount,
+          helper: input.brandSlotAsset?.storagePath ?? 'Logo, material, mistnost nebo produkt ktery musi zustat konzistentni.',
+          asset: input.brandSlotAsset,
         },
       ];
     default:
@@ -961,6 +1088,7 @@ function getRouteUploadConfigs(input: {
           title: 'Vstupni obrazky',
           count: input.originalAsset ? 1 : 0,
           helper: input.originalAsset ? input.originalAsset.storagePath : 'Nahraj hlavni source fotku',
+          asset: input.originalAsset,
         },
         {
           id: 'nano-style-upload',
@@ -968,15 +1096,17 @@ function getRouteUploadConfigs(input: {
           mode: 'style' as const,
           title: 'Stylove obrazky',
           count: input.referenceAssets.length,
-          helper: baseStyleHelper,
+          helper: input.styleSlotAsset?.storagePath ?? baseStyleHelper,
+          asset: input.styleSlotAsset,
         },
         {
           id: 'nano-brand-upload',
           dragKey: 'brand' as const,
           mode: 'brand' as const,
           title: 'Proprietarni prvky',
-          count: input.lockedCount,
-          helper: 'Logo / klobouk / boty / produkt. Neovlivnuje styl, pouze obsahove doplneni vystupu.',
+          count: input.brandSlotAsset ? 1 : input.lockedCount,
+          helper: input.brandSlotAsset?.storagePath ?? 'Logo / klobouk / boty / produkt. Neovlivnuje styl, pouze obsahove doplneni vystupu.',
+          asset: input.brandSlotAsset,
         },
       ];
   }
@@ -1005,16 +1135,28 @@ function renderRouteCommandBody(props: {
   onInfographicTopicChange: (value: string) => void;
   onInfographicFormatChange: (value: 'A4' | 'square' | 'story' | 'wide') => void;
   onInfographicThemeChange: (value: 'light' | 'dark') => void;
+  promptMode: 'simple' | 'interpretation';
 }) {
   switch (props.route) {
     case 'mulen':
       return (
         <>
-          <textarea
-            value={props.snapshot.photoDirectorInstruction}
-            onChange={(event) => props.onInstructionChange(event.target.value)}
-            placeholder="Volitelne: doplnujici prompt."
-          />
+          <div className="nano-prompt-editor">
+            {!props.snapshot.photoDirectorInstruction && props.promptMode === 'simple' ? (
+              <span className="nano-prompt-editor-icon" aria-hidden="true">
+                ✎
+              </span>
+            ) : null}
+            <textarea
+              value={props.snapshot.photoDirectorInstruction}
+              onChange={(event) => props.onInstructionChange(event.target.value)}
+              placeholder={
+                props.promptMode === 'interpretation'
+                  ? 'Popiste obrazek prirozene. Vyberte variantu nize pro urceni stylu interpretace...'
+                  : ''
+              }
+            />
+          </div>
           <input
             value={props.snapshot.photoDirectorLockedText}
             onChange={(event) => props.onLockedTextChange(event.target.value)}
@@ -1215,218 +1357,101 @@ function renderRouteCommandBody(props: {
   }
 }
 
-function NanoRightSidebar(props: {
-  snapshot: WorkspaceState;
-  activeRoute: NanoRoute;
-  routePanel: ReactNode;
-  onCreateExport: () => void;
-  onExportFormatChange: (value: 'png' | 'jpg' | 'pdf' | 'html') => void;
-  onExportUseCaseChange: (value: 'web' | 'social' | 'print' | 'archive') => void;
-}) {
-  const exportCount = props.snapshot.assets.filter((asset) => asset.kind === 'export').length;
-  const libraryCount = props.snapshot.assets.filter((asset) => asset.kind === 'generated').length;
-  const lockedSummary = useMemo(
-    () => props.snapshot.lockedAreas.slice(0, 3).map((area) => area.label).join(' · '),
-    [props.snapshot.lockedAreas],
-  );
-  const showMainSettings = props.activeRoute === 'mulen';
-
-  return (
-    <aside className="nano-right-panel">
-      {showMainSettings ? (
-        <>
-          <section className="nano-settings-block">
-            <p className="nano-block-title">Vyber modelu</p>
-            <div className="nano-model-grid">
-              <button type="button">Presne</button>
-              <button className="active" type="button">Premium</button>
-              <button type="button">Bezpecne</button>
-              <button type="button">Kreativni</button>
-            </div>
-          </section>
-
-          <section className="nano-settings-block">
-            <p className="nano-block-title">Rezimy promptu</p>
-            <div className="nano-chip-grid">
-              <button type="button">Styl</button>
-              <button type="button">Merge</button>
-              <button type="button">Object</button>
-              <button type="button">Vylepsit</button>
-              <button type="button">Sablony</button>
-              <button type="button">Kolekce</button>
-            </div>
-          </section>
-        </>
-      ) : null}
-
-      <div className="nano-route-panel">{props.routePanel}</div>
-
-      <section className="nano-library-card">
-        <strong>Knihovna</strong>
-        <p>Vstupni i generovane obrazky. Otevre samostatne okno pro pretazeni do sekci.</p>
-        <small>{libraryCount} generovanych · {exportCount} exportu</small>
-      </section>
-
-      <section className="nano-memory-card">
-        <strong>Project memory</strong>
-        <p>{lockedSummary || 'Zamcene oblasti se projevi tady, az je doplnime textem nebo referencemi.'}</p>
-        <div className="nano-memory-actions">
-          <button type="button" onClick={props.onCreateExport}>Export</button>
-          <span>{getNanoRouteLabel(props.activeRoute)}</span>
-        </div>
-      </section>
-    </aside>
-  );
+function isPromptEnhanceableRoute(route: NanoRoute) {
+  return route === 'mulen' || route === 'variant-lab' || route === 'visual-guide' || route === 'infographic';
 }
 
-function RightPanel(props: {
+function NanoRightSidebar(props: {
   activeRoute: NanoRoute;
-  snapshot: WorkspaceState;
-  onInstructionChange: (value: string) => void;
-  onLockedTextChange: (value: string) => void;
-  onUploadImage: (file: File) => void;
-  onUploadReference: (file: File) => void;
-  onOutputCountChange: (value: number) => void;
-  onAspectRatioChange: (value: 'original' | 'square' | 'portrait' | 'landscape') => void;
-  onPolishModeChange: (value: 'focused' | 'balanced' | 'bold') => void;
-  onGenerate: () => void;
-  onVariantCountChange: (value: number) => void;
-  onVariantIntensityChange: (value: 'jemne' | 'stredne' | 'odvazne') => void;
-  onGenerateVariants: () => void;
-  onMultiAngleSetTypeChange: (value: 'produktova' | 'interier' | 'lifestyle' | 'social') => void;
-  onMultiAngleShotCountChange: (value: number) => void;
-  onMultiAnglePrecisionChange: (value: 'bezpecna' | 'kreativni') => void;
-  onGenerateMultiAngle: () => void;
-  onHeadswapHairModeChange: (value: 'source' | 'target' | 'auto') => void;
-  onHeadswapNoteChange: (versionId: string, value: string) => void;
-  headswapResultVersions: ImageVersion[];
-  onHeadswapSourceUpload: (file: File) => void;
-  onHeadswapTargetUpload: (file: File) => void;
-  onRefineHeadswap: (versionId: string) => void;
-  onGenerateHeadswap: () => void;
-  onVisualGuidePromptChange: (value: string) => void;
-  onVisualGuideStepCountChange: (value: number) => void;
-  onVisualGuideStyleChange: (value: 'fotorealisticky' | 'edukativni' | 'technicky' | 'editorial') => void;
-  onVisualGuideOutputChange: (value: 'carousel' | 'pdf' | 'blog' | 'web') => void;
-  onGenerateVisualGuide: () => void;
-  onInfographicTopicChange: (value: string) => void;
-  onInfographicTypeChange: (value: 'edukacni' | 'srovnavaci' | 'procesni' | 'business') => void;
-  onInfographicFormatChange: (value: 'A4' | 'square' | 'story' | 'wide') => void;
-  onInfographicThemeChange: (value: 'light' | 'dark') => void;
-  onGenerateInfographic: () => void;
-  onUpscalerScaleChange: (value: '2k' | '4k') => void;
-  onUpscalerFocusChange: (value: 'full' | 'face' | 'product') => void;
-  onGenerateUpscale: () => void;
-  onModelInfluencePromptChange: (value: string) => void;
-  onModelInfluenceStrengthChange: (value: 'low' | 'medium' | 'high') => void;
-  onGenerateModelInfluence: () => void;
-  onStyleTransferPromptChange: (value: string) => void;
-  onStyleTransferPreserveCompositionChange: (value: boolean) => void;
-  onGenerateStyleTransfer: () => void;
-  onExportFormatChange: (value: 'png' | 'jpg' | 'pdf' | 'html') => void;
-  onExportUseCaseChange: (value: 'web' | 'social' | 'print' | 'archive') => void;
-  onCreateExport: () => void;
-  isGenerating: boolean;
+  promptMode: 'simple' | 'interpretation';
+  onPromptModeChange: (value: 'simple' | 'interpretation') => void;
+  simpleLinkMode: 'style' | 'merge' | 'object' | null;
+  onSimpleLinkModeChange: (value: 'style' | 'merge' | 'object') => void;
+  advancedVariant: 'A' | 'B' | 'C';
+  onAdvancedVariantChange: (value: 'A' | 'B' | 'C') => void;
+  faceIdentityMode: boolean;
+  onFaceIdentityModeChange: (value: boolean) => void;
 }) {
-  const activeRoute = props.activeRoute;
-
+  const simpleOptions = [
+    { id: 'style' as const, label: 'STYL', summary: 'kompozice', description: 'Prenese kompozici, nasviceni a barvy ze stylu. Obsah i identita zustanou ze vstupu.' },
+    { id: 'merge' as const, label: 'MERGE', summary: 'spojeni', description: 'Volne spoji vstup a referenci do jednoho vysledku. Meni obsah i formu najednou.' },
+    { id: 'object' as const, label: 'OBJECT', summary: 'objekt', description: 'Prenese dominantni objekt nebo prvek z reference do vstupniho obrazu.' },
+  ];
+  const advancedOptions = [
+    { id: 'A' as const, label: 'VARIANTA A', summary: 'Autenticita', description: 'Maximalni autenticita a verohodnost. Drzi realitu a prirozene nedokonalosti.' },
+    { id: 'B' as const, label: 'VARIANTA B', summary: 'Vylepseni', description: 'Silnejsi esteticke vylepseni. Cistsi, vybrusenejsi a vice premium vysledek.' },
+    { id: 'C' as const, label: 'VARIANTA C', summary: 'Vybalancovane', description: 'Vyrovnany kompromis mezi realitou a estetikou. Bezpecna vychozi volba.' },
+  ];
   return (
-    <>
-      {activeRoute === 'ai-upscaler' ? (
-        <AiUpscalerPanel
-          scale={props.snapshot.aiUpscalerScale}
-          focus={props.snapshot.aiUpscalerFocus}
-          onScaleChange={props.onUpscalerScaleChange}
-          onFocusChange={props.onUpscalerFocusChange}
-          onGenerate={props.onGenerateUpscale}
-          isGenerating={props.isGenerating}
-        />
-      ) : null}
-      {activeRoute === 'variant-lab' ? (
-        <VariantLabPanel
-          count={props.snapshot.variantLabCount}
-          intensity={props.snapshot.variantLabIntensity}
-          onCountChange={props.onVariantCountChange}
-          onIntensityChange={props.onVariantIntensityChange}
-          onGenerateVariants={props.onGenerateVariants}
-          isGenerating={props.isGenerating}
-        />
-      ) : null}
-      {activeRoute === 'reframe' ? (
-        <MultiAnglePanel
-          setType={props.snapshot.multiAngleSetType}
-          shotCount={props.snapshot.multiAngleShotCount}
-          precision={props.snapshot.multiAnglePrecision}
-          onSetTypeChange={props.onMultiAngleSetTypeChange}
-          onShotCountChange={props.onMultiAngleShotCountChange}
-          onPrecisionChange={props.onMultiAnglePrecisionChange}
-          onGenerate={props.onGenerateMultiAngle}
-          isGenerating={props.isGenerating}
-        />
-      ) : null}
-      {activeRoute === 'face-swap' ? (
-        <HeadSwapPanel
-          sourceAsset={props.snapshot.assets.find((asset) => asset.id === props.snapshot.headswapSourceAssetId)}
-          targetAsset={props.snapshot.assets.find((asset) => asset.id === props.snapshot.headswapTargetAssetId)}
-          hairMode={props.snapshot.headswapHairMode}
-          resultVersions={props.headswapResultVersions}
-          versionNotes={props.snapshot.headswapNotes}
-          onUploadSource={props.onHeadswapSourceUpload}
-          onUploadTarget={props.onHeadswapTargetUpload}
-          onHairModeChange={props.onHeadswapHairModeChange}
-          onNoteChange={props.onHeadswapNoteChange}
-          onRefineVariant={props.onRefineHeadswap}
-          onGenerate={props.onGenerateHeadswap}
-          isGenerating={props.isGenerating}
-        />
-      ) : null}
-      {activeRoute === 'visual-guide' ? (
-        <VisualGuidePanel
-          prompt={props.snapshot.visualGuidePrompt}
-          stepCount={props.snapshot.visualGuideStepCount}
-          style={props.snapshot.visualGuideStyle}
-          output={props.snapshot.visualGuideOutput}
-          onPromptChange={props.onVisualGuidePromptChange}
-          onStepCountChange={props.onVisualGuideStepCountChange}
-          onStyleChange={props.onVisualGuideStyleChange}
-          onOutputChange={props.onVisualGuideOutputChange}
-          onGenerate={props.onGenerateVisualGuide}
-          isGenerating={props.isGenerating}
-        />
-      ) : null}
-      {activeRoute === 'infographic' ? (
-        <InfographicPanel
-          topic={props.snapshot.infographicTopic}
-          type={props.snapshot.infographicType}
-          format={props.snapshot.infographicFormat}
-          theme={props.snapshot.infographicTheme}
-          onTopicChange={props.onInfographicTopicChange}
-          onTypeChange={props.onInfographicTypeChange}
-          onFormatChange={props.onInfographicFormatChange}
-          onThemeChange={props.onInfographicThemeChange}
-          onGenerate={props.onGenerateInfographic}
-          isGenerating={props.isGenerating}
-        />
-      ) : null}
-      {activeRoute !== 'mulen' &&
-      activeRoute !== 'ai-upscaler' &&
-      activeRoute !== 'variant-lab' &&
-      activeRoute !== 'reframe' &&
-      activeRoute !== 'face-swap' &&
-      activeRoute !== 'visual-guide' &&
-      activeRoute !== 'infographic' ? (
-        <section className="panel-block compact">
-          <div className="section-heading">
-            <Wand2 size={18} />
-            <span>{activeRoute}</span>
-          </div>
-          <p>
-            Tady prijde dalsi samostatny modul. Zakladni Project Memory, galerie, timeline a aktivni verze uz sdili
-            vsechny dalsi casti aplikace.
+    <aside className="nano-right-panel">
+      {props.activeRoute === 'mulen' ? (
+        <section className="nano-settings-block nano-prompt-mode-block">
+          <p className="nano-block-title">Rezim promptu</p>
+          <p className="nano-prompt-mode-description">
+            {props.promptMode === 'simple'
+              ? 'Volitelne: doplnujici prompt. Styl, merge i object funguji i bez textu.'
+              : 'Popiste obrazek prirozene. Vyberte variantu nize pro urceni stylu interpretace.'}
           </p>
+          <div className="nano-prompt-mode-tabs">
+            <button
+              type="button"
+              className={props.promptMode === 'simple' ? 'nano-prompt-mode-tab active' : 'nano-prompt-mode-tab'}
+              onClick={() => props.onPromptModeChange('simple')}
+            >
+              Simple
+            </button>
+            <button
+              type="button"
+              className={props.promptMode === 'interpretation' ? 'nano-prompt-mode-tab active' : 'nano-prompt-mode-tab'}
+              onClick={() => props.onPromptModeChange('interpretation')}
+            >
+              Interpretace
+            </button>
+          </div>
+          {props.promptMode === 'simple' ? (
+            <div className="nano-prompt-mode-grid">
+              {simpleOptions.map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  className={props.simpleLinkMode === option.id ? 'nano-prompt-mode-option active' : 'nano-prompt-mode-option'}
+                  onClick={() => props.onSimpleLinkModeChange(option.id)}
+                >
+                  <strong>{option.label}</strong>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="nano-prompt-mode-advanced">
+              <div className="nano-prompt-mode-grid advanced">
+                {advancedOptions.map((option) => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    className={props.advancedVariant === option.id ? 'nano-prompt-mode-option active' : 'nano-prompt-mode-option'}
+                    onClick={() => props.onAdvancedVariantChange(option.id)}
+                  >
+                    <strong>{option.label}</strong>
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                className={props.faceIdentityMode ? 'nano-face-identity-card active' : 'nano-face-identity-card'}
+                onClick={() => props.onFaceIdentityModeChange(!props.faceIdentityMode)}
+              >
+                <span className="nano-face-toggle" aria-hidden="true">
+                  <i />
+                </span>
+                <span>
+                  <strong>Zachovani identity tvare</strong>
+                </span>
+              </button>
+            </div>
+          )}
         </section>
       ) : null}
-    </>
+    </aside>
   );
 }
 
@@ -1441,6 +1466,18 @@ export function ProjectWorkspace(props: {
   const [workspace, setWorkspace] = useState(() => createWorkspaceState(snapshot));
   const [isGenerating, setIsGenerating] = useState(false);
   const [workspaceNote, setWorkspaceNote] = useState('Pokracuj z aktivni verze a branchuj dalsi smery bez ztraty historie.');
+  const [previousPromptBeforeEnhance, setPreviousPromptBeforeEnhance] = useState<{ route: NanoRoute; value: string } | null>(null);
+  const [isEnhancing, setIsEnhancing] = useState(false);
+  const [enhanceError, setEnhanceError] = useState<string | null>(null);
+  const [promptMode, setPromptMode] = useState<'simple' | 'interpretation'>('simple');
+  const [simpleLinkMode, setSimpleLinkMode] = useState<'style' | 'merge' | 'object' | null>(null);
+  const [advancedVariant, setAdvancedVariant] = useState<'A' | 'B' | 'C'>('C');
+  const [faceIdentityMode, setFaceIdentityMode] = useState(false);
+  const [savedPrompts, setSavedPrompts] = useState<SavedPrompt[]>([]);
+  const [isSavedPromptsOpen, setIsSavedPromptsOpen] = useState(false);
+  const [isSavePromptOpen, setIsSavePromptOpen] = useState(false);
+  const [savedPromptDraftName, setSavedPromptDraftName] = useState('');
+  const [selectedSavedPromptId, setSelectedSavedPromptId] = useState<string | null>(null);
 
   const syncWorkspaceFromApi = async () => {
     const nextSnapshot = await api.getProject(workspace.project.id);
@@ -1510,6 +1547,37 @@ export function ProjectWorkspace(props: {
     }
   }, [props.apiConfig, props.loadingError]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = window.localStorage.getItem(SAVED_PROMPTS_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Array<Partial<SavedPrompt> & { prompt?: string }>;
+      if (Array.isArray(parsed)) {
+        const normalized = parsed
+          .filter((item) => item && typeof item.id === 'string' && (typeof item.text === 'string' || typeof item.prompt === 'string'))
+          .map((item) => {
+            const id = String(item.id);
+            const text = typeof item.text === 'string' ? item.text : String(item.prompt ?? '');
+            const name =
+              typeof item.name === 'string' && item.name.trim()
+                ? item.name.trim()
+                : text.slice(0, 36).trim() || 'Ulozeny prompt';
+            return {
+              id,
+              name,
+              text,
+              createdAt: typeof item.createdAt === 'string' ? item.createdAt : new Date().toISOString(),
+            };
+          });
+        setSavedPrompts(normalized);
+        setSelectedSavedPromptId(normalized[0]?.id ?? null);
+      }
+    } catch {
+      // Keep UI usable even if localStorage contains invalid data.
+    }
+  }, []);
+
   const setActiveVersion = (versionId: string) => {
     startTransition(() => {
       setWorkspace((current) => ({
@@ -1523,6 +1591,7 @@ export function ProjectWorkspace(props: {
   };
 
   const setInstruction = (value: string) => {
+    setEnhanceError(null);
     startTransition(() => {
       setWorkspace((current) => ({
         ...current,
@@ -1538,6 +1607,123 @@ export function ProjectWorkspace(props: {
         photoDirectorLockedText: value,
       }));
     });
+  };
+
+  const persistSavedPrompts = (nextPrompts: SavedPrompt[]) => {
+    setSavedPrompts(nextPrompts);
+    setSelectedSavedPromptId(nextPrompts[0]?.id ?? null);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(SAVED_PROMPTS_STORAGE_KEY, JSON.stringify(nextPrompts));
+    }
+  };
+
+  const getPromptValueForRoute = (route: NanoRoute, current: WorkspaceState) => {
+    switch (route) {
+      case 'mulen':
+      case 'variant-lab':
+        return current.photoDirectorInstruction;
+      case 'visual-guide':
+        return current.visualGuidePrompt;
+      case 'infographic':
+        return current.infographicTopic;
+      default:
+        return '';
+    }
+  };
+
+  const setPromptValueForRoute = (route: NanoRoute, value: string) => {
+    startTransition(() => {
+      setWorkspace((current) => {
+        switch (route) {
+          case 'mulen':
+          case 'variant-lab':
+            return { ...current, photoDirectorInstruction: value };
+          case 'visual-guide':
+            return { ...current, visualGuidePrompt: value };
+          case 'infographic':
+            return { ...current, infographicTopic: value };
+          default:
+            return current;
+        }
+      });
+    });
+  };
+
+  const handleEnhancePrompt = async () => {
+    const route = props.activeRoute;
+    if (!isPromptEnhanceableRoute(route)) return;
+    const currentPrompt = getPromptValueForRoute(route, workspace);
+    if (!currentPrompt.trim()) {
+      setEnhanceError('Nejdriv napis prompt.');
+      return;
+    }
+
+    setIsEnhancing(true);
+    setEnhanceError(null);
+
+    try {
+      const response = await api.enhancePrompt({ prompt: currentPrompt });
+      setPreviousPromptBeforeEnhance({ route, value: currentPrompt });
+      setPromptValueForRoute(route, response.prompt);
+    } catch (error) {
+      setEnhanceError(error instanceof Error ? 'Prompt se nepodarilo vylepsit.' : 'Prompt se nepodarilo vylepsit.');
+    } finally {
+      setIsEnhancing(false);
+    }
+  };
+
+  const handleUndoPromptEnhance = () => {
+    if (!previousPromptBeforeEnhance || previousPromptBeforeEnhance.route !== props.activeRoute) return;
+    setPromptValueForRoute(previousPromptBeforeEnhance.route, previousPromptBeforeEnhance.value);
+    setPreviousPromptBeforeEnhance(null);
+    setEnhanceError(null);
+  };
+
+  const handleOpenSavePrompt = () => {
+    const text = getPromptValueForRoute(props.activeRoute, workspace).trim();
+    if (!text) {
+      setEnhanceError('Nejdriv napis prompt.');
+      return;
+    }
+    setSavedPromptDraftName(text.slice(0, 48).trim());
+    setIsSavePromptOpen(true);
+    setIsSavedPromptsOpen(false);
+    setEnhanceError(null);
+  };
+
+  const handleSavePrompt = () => {
+    const text = getPromptValueForRoute(props.activeRoute, workspace).trim();
+    const name = savedPromptDraftName.trim();
+    if (!text || !name) {
+      setEnhanceError('Prompt i nazev musi byt vyplnene.');
+      return;
+    }
+    const nextPrompt: SavedPrompt = {
+      id: `prompt-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      name,
+      text,
+      createdAt: new Date().toISOString(),
+    };
+    persistSavedPrompts([nextPrompt, ...savedPrompts]);
+    setEnhanceError(null);
+    setIsSavedPromptsOpen(false);
+    setIsSavePromptOpen(false);
+    setSavedPromptDraftName('');
+  };
+
+  const handleLoadPrompt = (text: string) => {
+    setPromptValueForRoute(props.activeRoute, text);
+    setIsSavedPromptsOpen(false);
+    setIsSavePromptOpen(false);
+    setEnhanceError(null);
+  };
+
+  const handleSelectSavedPrompt = (id: string) => {
+    setSelectedSavedPromptId(id);
+  };
+
+  const handleDeletePrompt = (id: string) => {
+    persistSavedPrompts(savedPrompts.filter((prompt) => prompt.id !== id));
   };
 
   const setVariantCount = (value: number) => {
@@ -1607,6 +1793,7 @@ export function ProjectWorkspace(props: {
   };
 
   const setVisualGuidePrompt = (value: string) => {
+    setEnhanceError(null);
     startTransition(() => {
       setWorkspace((current) => ({
         ...current,
@@ -1643,6 +1830,7 @@ export function ProjectWorkspace(props: {
   };
 
   const setInfographicTopic = (value: string) => {
+    setEnhanceError(null);
     startTransition(() => {
       setWorkspace((current) => ({
         ...current,
@@ -1851,7 +2039,7 @@ export function ProjectWorkspace(props: {
     });
   };
 
-  const handleUploadReference = async (file: File) => {
+  const handleUploadReference = async (file: File, slot: 'style' | 'brand' = 'style') => {
     if (props.apiConfig?.features.inlineUpload) {
       try {
         setWorkspaceNote(`Pridavam referenci ${file.name} do Visual Canon...`);
@@ -1865,7 +2053,10 @@ export function ProjectWorkspace(props: {
         });
 
         startTransition(() => {
-          setWorkspace(createWorkspaceState(response.snapshot));
+          const next = createWorkspaceState(response.snapshot);
+          if (slot === 'style') next.styleSlotAssetId = response.asset.id;
+          if (slot === 'brand') next.brandSlotAssetId = response.asset.id;
+          setWorkspace(next);
         });
         setWorkspaceNote(`Reference ${file.name} byla pridana do Visual Canon jako dalsi voditko pro konzistenci.`);
       } catch (error) {
@@ -1896,6 +2087,8 @@ export function ProjectWorkspace(props: {
         return {
           ...current,
           assets: [nextAsset, ...current.assets],
+          styleSlotAssetId: slot === 'style' ? assetId : current.styleSlotAssetId,
+          brandSlotAssetId: slot === 'brand' ? assetId : current.brandSlotAssetId,
           visualCanon: {
             ...current.visualCanon,
             referenceAssetIds: [current.project.originalAssetId, assetId].filter(Boolean) as string[],
@@ -1904,6 +2097,69 @@ export function ProjectWorkspace(props: {
         };
       });
     });
+  };
+
+  const handleSelectExistingAsset = (asset: Asset, slot: 'input' | 'style' | 'brand' | 'source-face' | 'target-scene') => {
+    const createdAt = new Date().toISOString();
+
+    startTransition(() => {
+      setWorkspace((current) => {
+        switch (slot) {
+          case 'input': {
+            const matchingVersion = current.versions.find((version) => version.assetId === asset.id);
+            return {
+              ...current,
+              project: {
+                ...current.project,
+                originalAssetId: asset.id,
+                activeVersionId: matchingVersion?.id ?? current.project.activeVersionId,
+                updatedAt: createdAt,
+              },
+            };
+          }
+          case 'style':
+            return {
+              ...current,
+              styleSlotAssetId: asset.id,
+              visualCanon: {
+                ...current.visualCanon,
+                referenceAssetIds: Array.from(new Set([asset.id, ...current.visualCanon.referenceAssetIds])),
+                updatedAt: createdAt,
+              },
+            };
+          case 'brand':
+            return {
+              ...current,
+              brandSlotAssetId: asset.id,
+              visualCanon: {
+                ...current.visualCanon,
+                referenceAssetIds: Array.from(new Set([asset.id, ...current.visualCanon.referenceAssetIds])),
+                updatedAt: createdAt,
+              },
+            };
+          case 'source-face':
+            return {
+              ...current,
+              headswapSourceAssetId: asset.id,
+            };
+          case 'target-scene':
+            return {
+              ...current,
+              headswapTargetAssetId: asset.id,
+            };
+        }
+      });
+    });
+
+    const labels = {
+      input: 'Vstupni slot ted pouziva vybrany obrazek z knihovny.',
+      style: 'Stylovy slot ted odkazuje na vybrany obrazek z knihovny.',
+      brand: 'Proprietarni slot ted odkazuje na vybrany obrazek z knihovny.',
+      'source-face': 'Source identita byla vybrana z knihovny.',
+      'target-scene': 'Target scena byla vybrana z knihovny.',
+    } as const;
+
+    setWorkspaceNote(labels[slot]);
   };
 
   const handleHeadswapSourceUpload = async (file: File) => {
@@ -2027,6 +2283,10 @@ export function ProjectWorkspace(props: {
           outputCount: workspace.photoDirectorOutputCount,
           aspectRatio: workspace.photoDirectorAspectRatio,
           polishMode: workspace.photoDirectorPolishMode,
+          promptMode,
+          simpleLinkMode,
+          advancedVariant,
+          faceIdentityMode,
           sourceVersionId: workspace.project.activeVersionId,
         });
 
@@ -2202,6 +2462,10 @@ export function ProjectWorkspace(props: {
           count: workspace.variantLabCount,
           intensity: workspace.variantLabIntensity,
           instruction: workspace.photoDirectorInstruction,
+          promptMode,
+          simpleLinkMode,
+          advancedVariant,
+          faceIdentityMode,
           sourceVersionId: workspace.project.activeVersionId,
         },
         startMessage: 'Variant Lab odesila batch do backend job systemu.',
@@ -3610,59 +3874,7 @@ export function ProjectWorkspace(props: {
     infographic: handleGenerateInfographic,
   };
 
-  const headswapResultVersions = workspace.versions.filter((version) => version.module === 'headswap');
   const activeMemoryVersion = workspace.versions.find((version) => version.id === workspace.project.activeVersionId) ?? workspace.versions[0];
-  const routePanel = (
-    <RightPanel
-      activeRoute={props.activeRoute}
-      snapshot={workspace}
-      onInstructionChange={setInstruction}
-      onLockedTextChange={setLockedText}
-      onUploadImage={handleUploadImage}
-      onUploadReference={handleUploadReference}
-      onOutputCountChange={setOutputCount}
-      onAspectRatioChange={setAspectRatio}
-      onPolishModeChange={setPolishMode}
-      onGenerate={handleGenerate}
-      onVariantCountChange={setVariantCount}
-      onVariantIntensityChange={setVariantIntensity}
-      onGenerateVariants={handleGenerateVariants}
-      onMultiAngleSetTypeChange={setMultiAngleSetType}
-      onMultiAngleShotCountChange={setMultiAngleShotCount}
-      onMultiAnglePrecisionChange={setMultiAnglePrecision}
-      onGenerateMultiAngle={handleGenerateMultiAngle}
-      onHeadswapHairModeChange={setHeadswapHairMode}
-      onHeadswapNoteChange={setHeadswapNote}
-      headswapResultVersions={headswapResultVersions}
-      onHeadswapSourceUpload={handleHeadswapSourceUpload}
-      onHeadswapTargetUpload={handleHeadswapTargetUpload}
-      onRefineHeadswap={handleRefineHeadswap}
-      onGenerateHeadswap={handleGenerateHeadswap}
-      onVisualGuidePromptChange={setVisualGuidePrompt}
-      onVisualGuideStepCountChange={setVisualGuideStepCount}
-      onVisualGuideStyleChange={setVisualGuideStyle}
-      onVisualGuideOutputChange={setVisualGuideOutput}
-      onGenerateVisualGuide={handleGenerateVisualGuide}
-      onInfographicTopicChange={setInfographicTopic}
-      onInfographicTypeChange={setInfographicType}
-      onInfographicFormatChange={setInfographicFormat}
-      onInfographicThemeChange={setInfographicTheme}
-      onGenerateInfographic={handleGenerateInfographic}
-      onUpscalerScaleChange={setUpscalerScale}
-      onUpscalerFocusChange={setUpscalerFocus}
-      onGenerateUpscale={handleGenerateUpscale}
-      onModelInfluencePromptChange={setModelInfluencePrompt}
-      onModelInfluenceStrengthChange={setModelInfluenceStrength}
-      onGenerateModelInfluence={handleGenerateModelInfluence}
-      onStyleTransferPromptChange={setStyleTransferPrompt}
-      onStyleTransferPreserveCompositionChange={setStyleTransferPreserveComposition}
-      onGenerateStyleTransfer={handleGenerateStyleTransfer}
-      onExportFormatChange={setExportFormat}
-      onExportUseCaseChange={setExportUseCase}
-      onCreateExport={handleCreateExport}
-      isGenerating={isGenerating}
-    />
-  );
 
   return (
     <div className={props.theme === 'dark' ? 'workspace workspace-dark' : 'workspace workspace-light'}>
@@ -3678,6 +3890,7 @@ export function ProjectWorkspace(props: {
           onUploadReference={handleUploadReference}
           onHeadswapSourceUpload={handleHeadswapSourceUpload}
           onHeadswapTargetUpload={handleHeadswapTargetUpload}
+          onSelectExistingAsset={handleSelectExistingAsset}
           onOutputCountChange={setOutputCount}
           onVariantCountChange={setVariantCount}
           onVariantIntensityChange={setVariantIntensity}
@@ -3699,6 +3912,31 @@ export function ProjectWorkspace(props: {
           onInfographicThemeChange={setInfographicTheme}
           onPrimaryAction={primaryActionByRoute[props.activeRoute]}
           isGenerating={isGenerating}
+          onEnhancePrompt={handleEnhancePrompt}
+          onUndoPromptEnhance={handleUndoPromptEnhance}
+          onOpenSavePrompt={handleOpenSavePrompt}
+          onSavePrompt={handleSavePrompt}
+          onLoadPrompt={handleLoadPrompt}
+          onDeletePrompt={handleDeletePrompt}
+          onSelectSavedPrompt={handleSelectSavedPrompt}
+          promptMode={promptMode}
+          canEnhancePrompt={Boolean(getPromptValueForRoute(props.activeRoute, workspace).trim())}
+          canUndoPromptEnhance={Boolean(previousPromptBeforeEnhance && previousPromptBeforeEnhance.route === props.activeRoute)}
+          canSavePrompt={Boolean(getPromptValueForRoute(props.activeRoute, workspace).trim())}
+          isEnhancingPrompt={isEnhancing}
+          enhanceError={enhanceError}
+          savedPrompts={savedPrompts}
+          isSavedPromptsOpen={isSavedPromptsOpen}
+          onToggleSavedPrompts={() => {
+            setIsSavePromptOpen(false);
+            setIsSavedPromptsOpen((current) => !current);
+            setSelectedSavedPromptId((current) => current ?? savedPrompts[0]?.id ?? null);
+          }}
+          isSavePromptOpen={isSavePromptOpen}
+          savedPromptDraftName={savedPromptDraftName}
+          onSavedPromptDraftNameChange={setSavedPromptDraftName}
+          onCloseSavePrompt={() => setIsSavePromptOpen(false)}
+          selectedSavedPromptId={selectedSavedPromptId}
         />
         <MainCanvas
           activeRoute={props.activeRoute}
@@ -3707,12 +3945,15 @@ export function ProjectWorkspace(props: {
           onSelectVersion={setActiveVersion}
         />
         <NanoRightSidebar
-          snapshot={workspace}
           activeRoute={props.activeRoute}
-          routePanel={routePanel}
-          onCreateExport={handleCreateExport}
-          onExportFormatChange={setExportFormat}
-          onExportUseCaseChange={setExportUseCase}
+          promptMode={promptMode}
+          onPromptModeChange={setPromptMode}
+          simpleLinkMode={simpleLinkMode}
+          onSimpleLinkModeChange={(value) => setSimpleLinkMode((current) => (current === value ? null : value))}
+          advancedVariant={advancedVariant}
+          onAdvancedVariantChange={setAdvancedVariant}
+          faceIdentityMode={faceIdentityMode}
+          onFaceIdentityModeChange={setFaceIdentityMode}
         />
       </div>
       <div className="memory-bottom-bar">

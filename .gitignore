@@ -11,3 +11,4 @@ design-backups
 *.png
 apps/api/.data
 supabase/.temp
+.claude
