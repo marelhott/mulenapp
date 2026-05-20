@@ -10,8 +10,24 @@ import type {
   WorkspaceSnapshot,
 } from '@mulen/shared';
 import { readStore, updateStore } from './store.js';
-import { canRunLivePhotoDirector, runLivePhotoDirectorJob } from './liveProviders.js';
-
+import {
+  canRunLivePhotoDirector,
+  runLivePhotoDirectorJob,
+  canRunLiveUpscale,
+  runLiveUpscaleJob,
+  canRunLiveHeadswap,
+  runLiveHeadswapJob,
+  canRunLiveVariantLab,
+  runLiveVariantLabJob,
+  canRunLiveStyleTransfer,
+  runLiveStyleTransferJob,
+  canRunLiveMultiAngle,
+  runLiveMultiAngleJob,
+  canRunLiveVisualGuide,
+  runLiveVisualGuideJob,
+  canRunLiveInfographic,
+  runLiveInfographicJob,
+} from './liveProviders.js';
 const MOCK_GENERATED_IMAGES = [
   'https://images.unsplash.com/photo-1511499767150-a48a237f0083?auto=format&fit=crop&w=1200&q=80',
   'https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=1200&q=80',
@@ -1243,16 +1259,61 @@ export async function processJob(jobId: string) {
   const job = current.snapshot.jobs.find((item) => item.id === jobId);
   if (!job) return;
 
+  console.log('>>> processJob started for', job.id, 'module:', job.module, 'workflow:', job.input?.workflow);
+  console.log('>>> canRunLivePhotoDirector:', canRunLivePhotoDirector());
+  console.log('>>> canRunLiveVariantLab:', canRunLiveVariantLab());
+
   try {
-    if (job.module === 'photo-director' && !job.input?.workflow && canRunLivePhotoDirector()) {
-      const liveSnapshot = await runLivePhotoDirectorJob(current.snapshot, job);
-      await updateStore((store) => ({
-        ...store,
-        snapshot: liveSnapshot,
-      }));
-      return;
+    if (job.module === 'photo-director') {
+      const workflow = String(job.input?.workflow || '');
+      if (workflow === 'ai-upscaler' && canRunLiveUpscale()) {
+        const liveSnapshot = await runLiveUpscaleJob(current.snapshot, job);
+        await updateStore((store) => ({ ...store, snapshot: liveSnapshot }));
+        return;
+      }
+      if (workflow === 'style-transfer' && canRunLiveStyleTransfer()) {
+        const liveSnapshot = await runLiveStyleTransferJob(current.snapshot, job);
+        await updateStore((store) => ({ ...store, snapshot: liveSnapshot }));
+        return;
+      }
+      if (!workflow && canRunLivePhotoDirector()) {
+        const liveSnapshot = await runLivePhotoDirectorJob(current.snapshot, job);
+        await updateStore((store) => ({ ...store, snapshot: liveSnapshot }));
+        return;
+      }
+    } else if (job.module === 'variant-lab') {
+      if (canRunLiveVariantLab()) {
+        const liveSnapshot = await runLiveVariantLabJob(current.snapshot, job);
+        await updateStore((store) => ({ ...store, snapshot: liveSnapshot }));
+        return;
+      }
+    } else if (job.module === 'multi-angle-reframe') {
+      if (canRunLiveMultiAngle()) {
+        const liveSnapshot = await runLiveMultiAngleJob(current.snapshot, job);
+        await updateStore((store) => ({ ...store, snapshot: liveSnapshot }));
+        return;
+      }
+    } else if (job.module === 'headswap') {
+      if (canRunLiveHeadswap()) {
+        const liveSnapshot = await runLiveHeadswapJob(current.snapshot, job);
+        await updateStore((store) => ({ ...store, snapshot: liveSnapshot }));
+        return;
+      }
+    } else if (job.module === 'visual-guide') {
+      if (canRunLiveVisualGuide()) {
+        const liveSnapshot = await runLiveVisualGuideJob(current.snapshot, job);
+        await updateStore((store) => ({ ...store, snapshot: liveSnapshot }));
+        return;
+      }
+    } else if (job.module === 'infographic-generator') {
+      if (canRunLiveInfographic()) {
+        const liveSnapshot = await runLiveInfographicJob(current.snapshot, job);
+        await updateStore((store) => ({ ...store, snapshot: liveSnapshot }));
+        return;
+      }
     }
   } catch (error) {
+    console.error('LIVE PROVIDER ERROR:', error);
     await updateStore((store) => ({
       ...store,
       snapshot: {

@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useRef, useState } from 'react';
+import { startTransition, useEffect, useRef, useState, useMemo } from 'react';
 import { PanelRight } from 'lucide-react';
 import type {
   Asset,
@@ -15,9 +15,10 @@ import type {
 import { OutputGallerySection } from './OutputGallery';
 import { TimelinePanel } from './Timeline';
 import { AssetLibraryPopover } from './AssetLibraryPopover';
+import { ImageComparisonModal } from './ImageComparisonModal';
 import type { NanoRoute } from '../../types/nano';
 import { getNanoRouteLabel, mapNanoRouteToModule } from '../../types/nano';
-import { api, fileToDataUrl, type ApiConfig, waitForJob } from '../../lib/api';
+import { api, fileToDataUrl, setModel, type ApiConfig, waitForJob } from '../../lib/api';
 
 type WorkspaceState = {
   project: Project;
@@ -138,40 +139,118 @@ function MainCanvas(props: {
   activeRoute: NanoRoute;
   onSelectVersion: (versionId: string) => void;
   onCreateExport: () => void;
+  isGenerating: boolean;
+  generatingCount?: number;
 }) {
+  const [zoomedVersionId, setZoomedVersionId] = useState<string | null>(null);
+  // Session-local generated images (cleared on refresh automatically because state is not persisted)
+  const [sessionImages, setSessionImages] = useState<Array<{
+    id: string;
+    versionId: string;
+    url: string;
+    prompt: string;
+    timestamp: number;
+    status: 'loading' | 'success' | 'error';
+    error?: string;
+  }>>([]);
+  const [editPrompts, setEditPrompts] = useState<Record<string, string>>({});
+  const [showReferenceUpload, setShowReferenceUpload] = useState<Record<string, boolean>>({});
+
+  // Sync newly persisted versions into sessionImages (only add, never pre-populate on mount)
+  const seenVersionIds = useRef(new Set<string>());
+  const isFirstMount = useRef(true);
+
+  useEffect(() => {
+    if (isFirstMount.current) {
+      // On first mount, mark all existing versions as "already seen" so they don't appear
+      props.snapshot.versions
+        .filter((v: ImageVersion) => v.module === 'photo-director')
+        .forEach((v: ImageVersion) => seenVersionIds.current.add(v.id));
+      isFirstMount.current = false;
+      return;
+    }
+    // After first mount, detect newly added versions
+    const photoVersions = props.snapshot.versions.filter((v: ImageVersion) => v.module === 'photo-director');
+    photoVersions.forEach((version: ImageVersion) => {
+      if (!seenVersionIds.current.has(version.id)) {
+        seenVersionIds.current.add(version.id);
+        const asset = getAsset(props.snapshot, version);
+        if (asset && asset.mimeType !== 'text/html') {
+          setSessionImages(prev => {
+            // Replace loading placeholder if exists, or add new
+            const exists = prev.find(img => img.versionId === version.id);
+            if (exists) {
+              return prev.map(img => img.versionId === version.id
+                ? { ...img, url: asset.url, status: 'success' as const }
+                : img
+              );
+            }
+            return [{
+              id: version.id,
+              versionId: version.id,
+              url: asset.url,
+              prompt: version.label || '',
+              timestamp: Date.parse(version.createdAt || new Date().toISOString()),
+              status: 'success' as const,
+            }, ...prev];
+          });
+        }
+      }
+    });
+  }, [props.snapshot.versions]);
+
+  // When generation starts, add loading placeholder(s)
+  const prevIsGenerating = useRef(false);
+  useEffect(() => {
+    if (props.isGenerating && !prevIsGenerating.current) {
+      const count = props.generatingCount ?? 1;
+      const placeholders = Array.from({ length: count }, (_, i) => ({
+        id: `loading-${Date.now()}-${i}`,
+        versionId: '',
+        url: '',
+        prompt: '',
+        timestamp: Date.now(),
+        status: 'loading' as const,
+      }));
+      setSessionImages(prev => [...placeholders, ...prev]);
+    }
+    if (!props.isGenerating && prevIsGenerating.current) {
+      // Remove lingering loading placeholders
+      setSessionImages(prev => prev.filter(img => img.status !== 'loading'));
+    }
+    prevIsGenerating.current = props.isGenerating;
+  }, [props.isGenerating]);
+
+  const photoDirectorVersions = useMemo(() =>
+    props.snapshot.versions.filter((v: ImageVersion) => v.module === 'photo-director'),
+  [props.snapshot.versions]);
+
+  const zoomedVersion = useMemo(() =>
+    photoDirectorVersions.find((v: ImageVersion) => v.id === zoomedVersionId) || null,
+  [photoDirectorVersions, zoomedVersionId]);
+
+  const zoomedAsset = useMemo(() =>
+    zoomedVersion ? getAsset(props.snapshot, zoomedVersion) : null,
+  [props.snapshot, zoomedVersion]);
+
   const activeModule = mapNanoRouteToModule(props.activeRoute);
   const activeVersion =
-    props.snapshot.versions.find((version) => version.id === props.snapshot.project.activeVersionId) ?? props.snapshot.versions[0];
+    props.snapshot.versions.find((version: ImageVersion) => version.id === props.snapshot.project.activeVersionId) ?? props.snapshot.versions[0];
   const activeAsset = activeVersion ? getAsset(props.snapshot, activeVersion) : undefined;
   const shouldRenderStageAsset =
     props.activeRoute !== 'mulen' &&
     !!activeAsset &&
     (activeAsset.kind === 'generated' || activeAsset.kind === 'export' || activeVersion?.module === 'infographic-generator');
   const stageConfig = getRouteStageConfig(props.snapshot, props.activeRoute, activeVersion);
-  const stageSupplement = getRouteStageSupplement(props.snapshot, props.activeRoute, activeVersion);
   const infographicLayout = activeAsset?.metadata?.layout as
     | { title?: string; theme?: 'light' | 'dark'; sections?: Array<{ title: string; body: string }> }
     | undefined;
 
+  const successImages = sessionImages.filter(img => img.status === 'success' && img.url);
+  const zoomedSessionImg = successImages.find(img => img.versionId === zoomedVersionId);
+
   return (
     <main className="main-canvas">
-      <div className="nano-canvas-heading">
-        <span className="nano-kicker-dot" />
-        <strong>Vysledky generovani</strong>
-      </div>
-      <div className="canvas-toolbar nano-canvas-toolbar">
-        <div>
-          <p>{stageConfig.eyebrow}</p>
-          <strong>{stageConfig.title}</strong>
-          <span className="canvas-subtitle">{stageConfig.subtitle}</span>
-        </div>
-        <div className="toolbar-actions">
-          <button type="button">{stageConfig.compareLabel}</button>
-          <button onClick={props.onCreateExport} type="button">
-            {stageConfig.exportLabel}
-          </button>
-        </div>
-      </div>
       {activeVersion?.module === 'infographic-generator' && infographicLayout ? (
         <div className={infographicLayout.theme === 'dark' ? 'infographic-stage dark' : 'infographic-stage'}>
           <div className="infographic-surface">
@@ -188,20 +267,253 @@ function MainCanvas(props: {
           </div>
         </div>
       ) : (
-        <div className="image-stage nano-image-stage">
-          {shouldRenderStageAsset && activeAsset ? (
-            <>
-              <img alt={activeVersion?.label ?? 'Active version'} src={activeAsset.url} />
-              <div className="nano-stage-footer">
-                <strong>{stageConfig.footerTitle}</strong>
-                <p>{stageConfig.footerText}</p>
-              </div>
-            </>
+        <div className={props.activeRoute === 'mulen' ? 'nano-image-grid-container w-full h-full overflow-y-auto' : 'image-stage nano-image-stage'}>
+          {props.activeRoute === 'mulen' ? (
+            <div className="nano-image-grid">
+              {/* Empty state */}
+              {sessionImages.length === 0 && !props.isGenerating && (
+                <div className="col-span-full flex flex-col items-center justify-center py-24 space-y-6">
+                  <div style={{ animation: 'spin-slow 20s linear infinite' }}>
+                    <svg width="100" height="100" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <style>{`@keyframes spin-slow { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+                      <circle cx="50" cy="50" r="2.5" fill="currentColor" className="text-white" />
+                      <circle cx="50" cy="40" r="2.2" fill="currentColor" style={{color:'#d1d5db'}} />
+                      <circle cx="58" cy="44" r="2.2" fill="currentColor" style={{color:'#d1d5db'}} />
+                      <circle cx="60" cy="50" r="2.2" fill="currentColor" style={{color:'#d1d5db'}} />
+                      <circle cx="58" cy="56" r="2.2" fill="currentColor" style={{color:'#d1d5db'}} />
+                      <circle cx="50" cy="60" r="2.2" fill="currentColor" style={{color:'#d1d5db'}} />
+                      <circle cx="42" cy="56" r="2.2" fill="currentColor" style={{color:'#d1d5db'}} />
+                      <circle cx="40" cy="50" r="2.2" fill="currentColor" style={{color:'#d1d5db'}} />
+                      <circle cx="42" cy="44" r="2.2" fill="currentColor" style={{color:'#d1d5db'}} />
+                      <circle cx="50" cy="30" r="2" fill="currentColor" style={{color:'#6b7280'}} />
+                      <circle cx="64" cy="36" r="2" fill="currentColor" style={{color:'#6b7280'}} />
+                      <circle cx="70" cy="50" r="2" fill="currentColor" style={{color:'#6b7280'}} />
+                      <circle cx="64" cy="64" r="2" fill="currentColor" style={{color:'#6b7280'}} />
+                      <circle cx="50" cy="70" r="2" fill="currentColor" style={{color:'#6b7280'}} />
+                      <circle cx="36" cy="64" r="2" fill="currentColor" style={{color:'#6b7280'}} />
+                      <circle cx="30" cy="50" r="2" fill="currentColor" style={{color:'#6b7280'}} />
+                      <circle cx="36" cy="36" r="2" fill="currentColor" style={{color:'#6b7280'}} />
+                      <circle cx="50" cy="20" r="1.5" fill="currentColor" style={{color:'#374151'}} />
+                      <circle cx="70" cy="28" r="1.5" fill="currentColor" style={{color:'#374151'}} />
+                      <circle cx="80" cy="50" r="1.5" fill="currentColor" style={{color:'#374151'}} />
+                      <circle cx="70" cy="72" r="1.5" fill="currentColor" style={{color:'#374151'}} />
+                      <circle cx="50" cy="80" r="1.5" fill="currentColor" style={{color:'#374151'}} />
+                      <circle cx="30" cy="72" r="1.5" fill="currentColor" style={{color:'#374151'}} />
+                      <circle cx="20" cy="50" r="1.5" fill="currentColor" style={{color:'#374151'}} />
+                      <circle cx="30" cy="28" r="1.5" fill="currentColor" style={{color:'#374151'}} />
+                    </svg>
+                  </div>
+                  <div className="text-center space-y-1.5">
+                    <span style={{fontSize:'10px',fontWeight:900,textTransform:'uppercase',letterSpacing:'0.28em',color:'var(--text-soft)',display:'block'}}>
+                      Zatím žádné vygenerované obrázky
+                    </span>
+                    <p style={{fontSize:'9px',fontWeight:500,color:'var(--text-secondary)'}}>
+                      Zadejte prompt v postranním panelu (vlevo) a začněte tvořit
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Image cards (session images) */}
+              {sessionImages.map((image) => (
+                <article
+                  key={image.id}
+                  className="nano-image-card group flex flex-col overflow-hidden"
+                  style={{animation: 'fadeIn 0.3s ease'}}
+                >
+                  {/* Image area */}
+                  <div
+                    className="relative bg-[var(--bg-panel)] cursor-zoom-in overflow-hidden"
+                    style={{aspectRatio:'1/1'}}
+                    onClick={() => image.status === 'success' && image.versionId && setZoomedVersionId(image.versionId)}
+                  >
+                    {image.status === 'loading' ? (
+                      <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/60" style={{backdropFilter:'blur(12px)',padding:'0 24px'}}>
+                        <div style={{width:'100%',maxWidth:'200px'}}>
+                          {/* Progress bar */}
+                          <div style={{position:'relative',height:'2px',background:'#1f2937',borderRadius:'9999px',overflow:'hidden',marginBottom:'10px'}}>
+                            <div
+                              style={{
+                                position:'absolute',inset:'0 auto 0 0',background:'#7ed957',
+                                borderRadius:'9999px',boxShadow:'0 0 10px rgba(126,217,87,0.5)',
+                                animation:'growWidth 10s cubic-bezier(0.4,0,0.2,1) forwards'
+                              }}
+                            />
+                            <style>{`@keyframes growWidth { 0%{width:0%} 10%{width:15%} 40%{width:50%} 70%{width:80%} 100%{width:95%} }`}</style>
+                          </div>
+                          <div style={{textAlign:'center'}}>
+                            <span style={{fontSize:'10px',color:'#7ed957',fontWeight:700,letterSpacing:'0.1em',textTransform:'uppercase',animation:'pulse 1.5s infinite'}}>Generuji...</span>
+                          </div>
+                        </div>
+                      </div>
+                    ) : image.status === 'error' ? (
+                      <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center" style={{background:'rgba(0,0,0,0.8)',backdropFilter:'blur(4px)'}}>
+                        <div style={{width:40,height:40,background:'rgba(239,68,68,0.2)',border:'1px solid rgba(239,68,68,0.3)',borderRadius:8,display:'flex',alignItems:'center',justifyContent:'center',marginBottom:16,color:'#ef4444'}}>
+                          <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" /></svg>
+                        </div>
+                        <p style={{fontSize:'10px',fontWeight:700,color:'#f87171',maxWidth:150,lineHeight:1.5}}>{image.error || 'Chyba generování'}</p>
+                      </div>
+                    ) : (
+                      image.url && (
+                        <img
+                          src={image.url}
+                          alt={image.prompt}
+                          style={{width:'100%',height:'100%',objectFit:'contain',background:'var(--bg-contrast)'}}
+                          decoding="sync"
+                        />
+                      )
+                    )}
+                  </div>
+
+                  {/* Card footer */}
+                  {image.status === 'success' && (
+                    <>
+                      <div style={{padding:'10px 14px',borderTop:'1px solid var(--border-color)',background:'var(--bg-card)',display:'flex',alignItems:'center',gap:8}}>
+                        <p style={{fontSize:'9px',fontWeight:500,color:'var(--text-muted)',flex:1,overflow:'hidden',whiteSpace:'nowrap',textOverflow:'ellipsis'}} title={image.prompt}>
+                          {image.prompt || '(bez promptu)'}
+                        </p>
+                        <div style={{display:'flex',gap:4,flexShrink:0}}>
+                          {/* Copy prompt */}
+                          <button
+                            onClick={(e) => { e.stopPropagation(); navigator.clipboard?.writeText(image.prompt); }}
+                            style={{padding:'5px',background:'transparent',border:'none',cursor:'pointer',color:'var(--text-secondary)',borderRadius:4,transition:'background 0.15s'}}
+                            title="Kopírovat prompt"
+                          >
+                            <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
+                          </button>
+                          {/* Download */}
+                          <a
+                            href={image.url}
+                            download
+                            onClick={(e) => e.stopPropagation()}
+                            style={{padding:'5px',background:'transparent',border:'none',cursor:'pointer',color:'var(--text-secondary)',borderRadius:4,transition:'background 0.15s',display:'flex',alignItems:'center'}}
+                            title="Stáhnout"
+                          >
+                            <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                          </a>
+                          {/* Delete */}
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setSessionImages(prev => prev.filter(img => img.id !== image.id)); }}
+                            style={{padding:'5px',background:'transparent',border:'none',cursor:'pointer',color:'var(--text-secondary)',borderRadius:4,transition:'background 0.15s'}}
+                            title="Smazat"
+                          >
+                            <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Inline edit */}
+                      <div style={{padding:'10px 14px',borderTop:'1px solid var(--border-color)',background:'var(--bg-card)'}}>
+                        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8}}>
+                          <div style={{display:'flex',alignItems:'center',gap:6}}>
+                            <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="#7ed957"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                            <span style={{fontSize:'9px',fontWeight:900,textTransform:'uppercase',letterSpacing:'0.1em',color:'var(--text-secondary)'}}>Upravit prompt</span>
+                          </div>
+                          <div style={{display:'flex',gap:6}}>
+                            {editPrompts[image.id] !== undefined && editPrompts[image.id] !== image.prompt && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setEditPrompts(prev => { const n = {...prev}; delete n[image.id]; return n; }); }}
+                                style={{padding:'3px 8px',fontSize:'8px',fontWeight:700,textTransform:'uppercase',letterSpacing:'0.08em',background:'var(--surface-highlight)',border:'none',borderRadius:4,cursor:'pointer',color:'var(--text-secondary)'}}
+                              >Vrátit</button>
+                            )}
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setShowReferenceUpload(prev => ({...prev, [image.id]: !prev[image.id]})); }}
+                              style={{
+                                padding:'3px 8px',fontSize:'8px',fontWeight:700,textTransform:'uppercase',letterSpacing:'0.08em',
+                                background: showReferenceUpload[image.id] ? '#7ed957' : 'var(--bg-input)',
+                                color: showReferenceUpload[image.id] ? '#0a0f0d' : 'var(--text-secondary)',
+                                border: `1px solid ${showReferenceUpload[image.id] ? '#7ed957' : 'var(--border-color)'}`,
+                                borderRadius:4,cursor:'pointer',display:'flex',alignItems:'center',gap:4
+                              }}
+                            >
+                              <svg width="10" height="10" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                              {showReferenceUpload[image.id] ? 'Skrýt' : '+ Obrázky'}
+                            </button>
+                          </div>
+                        </div>
+
+                        <textarea
+                          value={editPrompts[image.id] ?? image.prompt}
+                          onChange={(e) => { e.stopPropagation(); setEditPrompts(prev => ({...prev, [image.id]: e.target.value})); }}
+                          onClick={(e) => e.stopPropagation()}
+                          placeholder="Popište úpravy a stiskněte Regenerovat..."
+                          rows={3}
+                          style={{
+                            width:'100%',background:'var(--bg-elevated)',border:'1px solid var(--border-color)',
+                            borderRadius:6,padding:'8px',fontSize:'11px',color:'var(--text-primary)',
+                            resize:'none',outline:'none',fontFamily:'inherit',lineHeight:1.5,
+                            transition:'border-color 0.15s',boxSizing:'border-box'
+                          }}
+                        />
+
+                        {/* Reference image upload strip */}
+                        {showReferenceUpload[image.id] && (
+                          <div style={{marginTop:8,padding:8,background:'var(--bg-elevated)',border:'1px solid var(--border-color)',borderRadius:6,display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:4}}>
+                            <label style={{display:'flex',alignItems:'center',justifyContent:'center',aspectRatio:'1/1',borderRadius:4,border:'1px dashed var(--border-strong)',cursor:'pointer',fontSize:18,color:'var(--text-secondary)',transition:'border-color 0.15s'}}>
+                              +
+                              <input type="file" multiple accept="image/*" className="hidden" onClick={(e) => e.stopPropagation()} onChange={(e) => { e.stopPropagation(); }} />
+                            </label>
+                          </div>
+                        )}
+
+                        <button
+                          disabled={!editPrompts[image.id]?.trim()}
+                          onClick={(e) => e.stopPropagation()}
+                          style={{
+                            marginTop:8,width:'100%',padding:'8px',
+                            background:'linear-gradient(to right,rgba(59,130,246,0.2),rgba(37,99,235,0.2))',
+                            color:'#60a5fa',border:'1px solid rgba(59,130,246,0.3)',borderRadius:6,
+                            fontSize:'9px',fontWeight:900,textTransform:'uppercase',letterSpacing:'0.1em',
+                            cursor:'pointer',transition:'all 0.15s',opacity: editPrompts[image.id]?.trim() ? 1 : 0.5
+                          }}
+                        >
+                          Regenerovat obrázek
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </article>
+              ))}
+            </div>
           ) : (
-            <div className="nano-stage-blank" aria-hidden="true" />
+            shouldRenderStageAsset && activeAsset ? (
+              <>
+                <img alt={activeVersion?.label ?? 'Active version'} src={activeAsset.url} />
+                <div className="nano-stage-footer">
+                  <strong>{stageConfig.footerTitle}</strong>
+                  <p>{stageConfig.footerText}</p>
+                </div>
+              </>
+            ) : (
+              <div className="nano-stage-blank" aria-hidden="true" />
+            )
           )}
         </div>
       )}
+
+      {/* Zoom modal */}
+      <ImageComparisonModal
+        isOpen={!!zoomedVersionId}
+        onClose={() => setZoomedVersionId(null)}
+        generatedImage={zoomedAsset?.url || null}
+        originalImage={props.snapshot.assets.find((a: Asset) => a.id === props.snapshot.project.originalAssetId)?.url || null}
+        prompt={zoomedVersion?.label || ''}
+        timestamp={Date.parse(zoomedVersion?.createdAt || new Date().toISOString())}
+        resolution={zoomedAsset?.metadata?.resolution as string}
+        aspectRatio={zoomedAsset?.metadata?.aspectRatio as string}
+        groundingMetadata={zoomedAsset?.metadata?.groundingMetadata}
+        onNext={() => {
+          const idx = photoDirectorVersions.findIndex((v: ImageVersion) => v.id === zoomedVersionId);
+          if (idx < photoDirectorVersions.length - 1) setZoomedVersionId(photoDirectorVersions[idx + 1].id);
+        }}
+        onPrev={() => {
+          const idx = photoDirectorVersions.findIndex((v: ImageVersion) => v.id === zoomedVersionId);
+          if (idx > 0) setZoomedVersionId(photoDirectorVersions[idx - 1].id);
+        }}
+        hasNext={zoomedVersionId ? photoDirectorVersions.findIndex((v: ImageVersion) => v.id === zoomedVersionId) < photoDirectorVersions.length - 1 : false}
+        hasPrev={zoomedVersionId ? photoDirectorVersions.findIndex((v: ImageVersion) => v.id === zoomedVersionId) > 0 : false}
+      />
+
       <div className="memory-drawer">
         <OutputGallerySection
           activeModule={activeModule}
@@ -213,6 +525,7 @@ function MainCanvas(props: {
     </main>
   );
 }
+
 
 function getRouteStageSupplement(
   snapshot: WorkspaceState,
@@ -534,6 +847,7 @@ function NanoLeftSidebar(props: {
   onSavedPromptDraftNameChange: (value: string) => void;
   onCloseSavePrompt: () => void;
   selectedSavedPromptId: string | null;
+  canGenerate: boolean;
 }) {
   const referenceAssets = props.snapshot.assets.filter((asset) => asset.kind === 'reference');
   const originalAsset = props.snapshot.assets.find((asset) => asset.id === props.snapshot.project.originalAssetId);
@@ -607,7 +921,7 @@ function NanoLeftSidebar(props: {
   return (
     <aside className="nano-left-panel">
       <section className="nano-action-panel">
-        <button className="nano-generate-button" disabled={props.isGenerating} onClick={props.onPrimaryAction} type="button">
+        <button className={`nano-generate-button ${props.canGenerate ? 'ready' : ''}`} disabled={!props.canGenerate || props.isGenerating} onClick={props.onPrimaryAction} type="button">
           <span>{commandConfig.primaryLabel}</span>
           <small>{props.isGenerating ? commandConfig.loadingLabel : commandConfig.primaryMeta}</small>
         </button>
@@ -1371,7 +1685,16 @@ function NanoRightSidebar(props: {
   onAdvancedVariantChange: (value: 'A' | 'B' | 'C') => void;
   faceIdentityMode: boolean;
   onFaceIdentityModeChange: (value: boolean) => void;
+  selectedModelId?: string;
+  onModelSelect?: (modelId: string) => void;
 }) {
+  const imageModelPresets = [
+    { id: 'gemini-flash', title: 'Nano 2', subtitle: 'Gemini 3.1 Flash' },
+    { id: 'gemini-pro', title: 'Nano Pro', subtitle: 'Gemini 3 Pro' },
+    { id: 'openai-image', title: 'GPT Img 2', subtitle: 'OpenAI' },
+    { id: 'flux-pro', title: 'Flux Pro', subtitle: 'fal.ai' },
+  ];
+
   const simpleOptions = [
     { id: 'style' as const, label: 'STYL', summary: 'kompozice', description: 'Prenese kompozici, nasviceni a barvy ze stylu. Obsah i identita zustanou ze vstupu.' },
     { id: 'merge' as const, label: 'MERGE', summary: 'spojeni', description: 'Volne spoji vstup a referenci do jednoho vysledku. Meni obsah i formu najednou.' },
@@ -1384,73 +1707,89 @@ function NanoRightSidebar(props: {
   ];
   return (
     <aside className="nano-right-panel">
+      {/* Model selection grid */}
+      <div className="nano-model-grid">
+        {imageModelPresets.map((preset) => {
+          const isActive = props.selectedModelId === preset.id;
+          return (
+            <button
+              key={preset.id}
+              type="button"
+              className={isActive ? 'nano-model-option active' : 'nano-model-option'}
+              onClick={() => props.onModelSelect?.(preset.id)}
+              title={`${preset.title} — ${preset.subtitle}`}
+            >
+              <div className="nano-model-title">{preset.title}</div>
+              <div className="nano-model-subtitle">{preset.subtitle}</div>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Prompt mode tabs */}
       {props.activeRoute === 'mulen' ? (
-        <section className="nano-settings-block nano-prompt-mode-block">
-          <p className="nano-block-title">Rezim promptu</p>
-          <p className="nano-prompt-mode-description">
-            {props.promptMode === 'simple'
-              ? 'Volitelne: doplnujici prompt. Styl, merge i object funguji i bez textu.'
-              : 'Popiste obrazek prirozene. Vyberte variantu nize pro urceni stylu interpretace.'}
-          </p>
-          <div className="nano-prompt-mode-tabs">
-            <button
-              type="button"
-              className={props.promptMode === 'simple' ? 'nano-prompt-mode-tab active' : 'nano-prompt-mode-tab'}
-              onClick={() => props.onPromptModeChange('simple')}
-            >
-              Simple
-            </button>
-            <button
-              type="button"
-              className={props.promptMode === 'interpretation' ? 'nano-prompt-mode-tab active' : 'nano-prompt-mode-tab'}
-              onClick={() => props.onPromptModeChange('interpretation')}
-            >
-              Interpretace
-            </button>
-          </div>
-          {props.promptMode === 'simple' ? (
-            <div className="nano-prompt-mode-grid">
-              {simpleOptions.map((option) => (
-                <button
-                  key={option.id}
-                  type="button"
-                  className={props.simpleLinkMode === option.id ? 'nano-prompt-mode-option active' : 'nano-prompt-mode-option'}
-                  onClick={() => props.onSimpleLinkModeChange(option.id)}
-                >
-                  <strong>{option.label}</strong>
-                </button>
-              ))}
-            </div>
-          ) : (
-            <div className="nano-prompt-mode-advanced">
-              <div className="nano-prompt-mode-grid advanced">
-                {advancedOptions.map((option) => (
-                  <button
-                    key={option.id}
-                    type="button"
-                    className={props.advancedVariant === option.id ? 'nano-prompt-mode-option active' : 'nano-prompt-mode-option'}
-                    onClick={() => props.onAdvancedVariantChange(option.id)}
-                  >
-                    <strong>{option.label}</strong>
-                  </button>
-                ))}
-              </div>
-              <button
-                type="button"
-                className={props.faceIdentityMode ? 'nano-face-identity-card active' : 'nano-face-identity-card'}
-                onClick={() => props.onFaceIdentityModeChange(!props.faceIdentityMode)}
-              >
-                <span className="nano-face-toggle" aria-hidden="true">
-                  <i />
-                </span>
-                <span>
-                  <strong>Zachovani identity tvare</strong>
-                </span>
-              </button>
-            </div>
-          )}
-        </section>
+        <div className="nano-prompt-mode-tabs">
+          <button
+            type="button"
+            className={props.promptMode === 'simple' ? 'nano-prompt-mode-tab active' : 'nano-prompt-mode-tab'}
+            onClick={() => props.onPromptModeChange('simple')}
+          >
+            Simple
+          </button>
+          <button
+            type="button"
+            className={props.promptMode === 'interpretation' ? 'nano-prompt-mode-tab active' : 'nano-prompt-mode-tab'}
+            onClick={() => props.onPromptModeChange('interpretation')}
+          >
+            Interpretace
+          </button>
+        </div>
       ) : null}
+
+      {/* Simple / Interpretation options */}
+      {props.promptMode === 'simple' ? (
+        <div className="nano-prompt-mode-grid">
+          {simpleOptions.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              className={props.simpleLinkMode === option.id ? 'nano-prompt-mode-option active' : 'nano-prompt-mode-option'}
+              onClick={() => props.onSimpleLinkModeChange(option.id)}
+            >
+              <strong>{option.label}</strong>
+              <span className="nano-option-summary">{option.summary}</span>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="nano-prompt-mode-advanced">
+          <div className="nano-prompt-mode-grid advanced">
+            {advancedOptions.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                className={props.advancedVariant === option.id ? 'nano-prompt-mode-option active' : 'nano-prompt-mode-option'}
+                onClick={() => props.onAdvancedVariantChange(option.id)}
+              >
+                <strong>{option.label}</strong>
+                <span className="nano-option-summary">{option.summary}</span>
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            className={props.faceIdentityMode ? 'nano-face-identity-card active' : 'nano-face-identity-card'}
+            onClick={() => props.onFaceIdentityModeChange(!props.faceIdentityMode)}
+          >
+            <span className="nano-face-toggle" aria-hidden="true">
+              <i />
+            </span>
+            <span>
+              <strong>Zachování identity tváře</strong>
+            </span>
+          </button>
+        </div>
+      )}
     </aside>
   );
 }
@@ -1478,6 +1817,32 @@ export function ProjectWorkspace(props: {
   const [isSavePromptOpen, setIsSavePromptOpen] = useState(false);
   const [savedPromptDraftName, setSavedPromptDraftName] = useState('');
   const [selectedSavedPromptId, setSelectedSavedPromptId] = useState<string | null>(null);
+  const [selectedModelId, setSelectedModelId] = useState<string>('gemini-flash');
+
+  useEffect(() => {
+    setModel(selectedModelId).catch(console.error);
+  }, [selectedModelId]);
+
+  const canGenerate = useMemo(() => {
+    switch (props.activeRoute) {
+      case 'mulen':
+        return workspace.photoDirectorInstruction.trim() !== '' || snapshot.assets.some((a: Asset) => a.kind === 'reference') || !!workspace.project.originalAssetId;
+      case 'ai-upscaler':
+        return !!workspace.project.originalAssetId;
+      case 'face-swap':
+        return !!workspace.headswapSourceAssetId && !!workspace.headswapTargetAssetId;
+      case 'reframe':
+        return !!workspace.project.originalAssetId;
+      case 'variant-lab':
+        return workspace.variantLabPrompt?.trim() !== '' || !!workspace.project.originalAssetId;
+      case 'visual-guide':
+        return workspace.visualGuidePrompt?.trim() !== '';
+      case 'infographic':
+        return workspace.infographicTopic?.trim() !== '';
+      default:
+        return true;
+    }
+  }, [props.activeRoute, workspace, snapshot.assets]);
 
   const syncWorkspaceFromApi = async () => {
     const nextSnapshot = await api.getProject(workspace.project.id);
@@ -3912,6 +4277,7 @@ export function ProjectWorkspace(props: {
           onInfographicThemeChange={setInfographicTheme}
           onPrimaryAction={primaryActionByRoute[props.activeRoute]}
           isGenerating={isGenerating}
+          canGenerate={canGenerate}
           onEnhancePrompt={handleEnhancePrompt}
           onUndoPromptEnhance={handleUndoPromptEnhance}
           onOpenSavePrompt={handleOpenSavePrompt}
@@ -3943,6 +4309,7 @@ export function ProjectWorkspace(props: {
           snapshot={workspace}
           onCreateExport={handleCreateExport}
           onSelectVersion={setActiveVersion}
+          isGenerating={isGenerating}
         />
         <NanoRightSidebar
           activeRoute={props.activeRoute}
@@ -3954,6 +4321,8 @@ export function ProjectWorkspace(props: {
           onAdvancedVariantChange={setAdvancedVariant}
           faceIdentityMode={faceIdentityMode}
           onFaceIdentityModeChange={setFaceIdentityMode}
+          selectedModelId={selectedModelId}
+          onModelSelect={setSelectedModelId}
         />
       </div>
       <div className="memory-bottom-bar">

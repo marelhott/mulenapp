@@ -106,6 +106,14 @@ export const api = {
   },
 };
 
+export const setModel = async (modelId: string): Promise<void> => {
+  // Placeholder: In real implementation this would call backend to persist selected model.
+  return new Promise((resolve) => setTimeout(() => {
+    console.log('Model set to', modelId);
+    resolve();
+  }, 200));
+};
+
 export async function fileToDataUrl(file: File) {
   return await new Promise<string>((resolve, reject) => {
     const reader = new FileReader();

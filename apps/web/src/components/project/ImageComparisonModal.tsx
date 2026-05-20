@@ -1,0 +1,384 @@
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+
+export const slugify = (text: string): string => {
+  return text
+    .toString()
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/[^\w-]+/g, '')
+    .replace(/--+/g, '-')
+    .replace(/^-+/, '')
+    .replace(/-+$/, '')
+    .substring(0, 50);
+};
+
+// Deterministic random number generator (Mulberry32)
+const mulberry32 = (a: number) => {
+    return () => {
+      let t = a += 0x6D2B79F5;
+      t = Math.imul(t ^ t >>> 15, t | 1);
+      t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    }
+}
+
+const pickOneWithWeight = (arr: string[], rand: () => number): string => {
+    if (arr.length === 0) return "";
+    const item = arr[Math.floor(rand() * arr.length)];
+    const weight = rand();
+    let prefix = "";
+    if (weight < 0.2) prefix = "Faint hint of ";
+    else if (weight < 0.4) prefix = "Subtle ";
+    else if (weight < 0.6) prefix = "";
+    else if (weight < 0.8) prefix = "Strong ";
+    else prefix = "Intense ";
+    return `${prefix}${item}`;
+};
+
+const VIBES = ["Cybernetic Industrialism", "Chromatic Synth-Aesthetic", "Retro-Digital Vapor", "High-Tech Futurism", "Degraded Signal Artifacts"];
+const LIGHTING = ["Golden-Hour Warmth", "Soft Overcast Diffusion", "Dramatic High-Contrast Chiaroscuro", "Volumetric Light Shafts", "Dappled Shadow Patterns"];
+const PALETTES = ["Teal and Orange Contrast", "Magenta and Cyan Vibrancy", "High-Contrast Noir Monochrome", "Warm Sepia Tones", "Earthy Terracotta and Sage"];
+const TEXTURES = ["Smooth Matte Finish", "Highly Polished Specular", "Liquid Viscosity", "Precision Vector Definition", "Crystalline Translucence"];
+const COMPOSITIONS = ["Minimalist Negative Space", "Symmetrical Center-Weighting", "Harmonious Proportional Balancing", "Chaotic Crowded Density", "Extreme Low-Angle Heroism"];
+
+export const getStyleDescription = (code: number): string => {
+    const rand = mulberry32(code);
+    const vibe = pickOneWithWeight(VIBES, rand);
+    const light = pickOneWithWeight(LIGHTING, rand);
+    const palette = pickOneWithWeight(PALETTES, rand);
+    const texture = pickOneWithWeight(TEXTURES, rand);
+    const comp = pickOneWithWeight(COMPOSITIONS, rand);
+    return `(IMPORTANT: Apply the following styles as integrated visual qualities within the scene. DO NOT add literal graphic overlays, UI elements, diagrams, lines, spirals, or technical symbols on top of the image. Visual Style: ${vibe}. Lighting: ${light}. Color Palette: ${palette}. Texture/Surface: ${texture}. Composition: ${comp}.)`;
+}
+
+interface ImageComparisonModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  originalImage: string | null;
+  generatedImage: string | null;
+  prompt: string;
+  promptLabel?: string;
+  timestamp?: number;
+  resolution?: string;
+  aspectRatio?: string;
+  styleCode?: number;
+  groundingMetadata?: any;
+  onNext?: () => void;
+  onPrev?: () => void;
+  hasNext?: boolean;
+  hasPrev?: boolean;
+  recipe?: any;
+  lineage?: { sourceImageIds: string[]; styleImageIds: string[]; sourceImageUrls: string[]; styleImageUrls: string[] };
+  versions?: Array<{ url: string; prompt: string; timestamp: number; recipe?: any }>;
+}
+
+export const ImageComparisonModal: React.FC<ImageComparisonModalProps> = ({
+  isOpen, onClose, originalImage, generatedImage, prompt, timestamp,
+  promptLabel = 'Prompt',
+  resolution, aspectRatio, styleCode, groundingMetadata,
+  onNext, onPrev, hasNext, hasPrev,
+  recipe, lineage, versions,
+}) => {
+  const [sliderPosition, setSliderPosition] = useState(50);
+  const [isDragging, setIsDragging] = useState(false);
+  const [isCompareMode, setIsCompareMode] = useState(false);
+  const [showFullPrompt, setShowFullPrompt] = useState(false);
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const [touchStart, setTouchStart] = useState<number | null>(null);
+  const [touchEnd, setTouchEnd] = useState<number | null>(null);
+
+  const handleMove = useCallback((clientX: number) => {
+    if (!containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const x = Math.max(0, Math.min(clientX - rect.left, rect.width));
+    setSliderPosition((x / rect.width) * 100);
+  }, []);
+
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => isDragging && handleMove(e.clientX);
+    const onMouseUp = () => setIsDragging(false);
+    if (isDragging) {
+      window.addEventListener('mousemove', onMouseMove);
+      window.addEventListener('mouseup', onMouseUp);
+    }
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+  }, [isDragging, handleMove]);
+
+  // Keyboard navigation
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!isOpen) return;
+      if (e.key === 'Escape') onClose();
+      if (e.key === 'ArrowRight' && hasNext) onNext?.();
+      if (e.key === 'ArrowLeft' && hasPrev) onPrev?.();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose, onNext, onPrev, hasNext, hasPrev]);
+
+  // Reset state when image changes
+  useEffect(() => {
+    setShowFullPrompt(false);
+  }, [generatedImage]);
+
+  const displayedPrompt = useMemo(() => {
+    if (showFullPrompt && styleCode !== undefined && styleCode !== null) {
+      return `${prompt} ${getStyleDescription(styleCode)}`;
+    }
+    return prompt;
+  }, [prompt, showFullPrompt, styleCode]);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(displayedPrompt);
+  };
+
+  const handleDownload = () => {
+    if (!generatedImage) return;
+    const link = document.createElement('a');
+    link.href = generatedImage;
+    const slug = slugify(prompt);
+    const time = timestamp || Date.now();
+    const stylePart = styleCode ? `-${styleCode}` : '';
+    link.download = `${time}${stylePart}${slug ? '-' + slug : ''}.jpg`;
+    link.click();
+  };
+
+  const onTouchStart = (e: React.TouchEvent) => {
+    setTouchEnd(null);
+    setTouchStart(e.targetTouches[0].clientX);
+  };
+
+  const onTouchMove = (e: React.TouchEvent) => {
+    setTouchEnd(e.targetTouches[0].clientX);
+  };
+
+  const onTouchEnd = () => {
+    if (!touchStart || !touchEnd) return;
+    const distance = touchStart - touchEnd;
+    const isLeftSwipe = distance > 50;
+    const isRightSwipe = distance < -50;
+
+    if (isLeftSwipe && hasNext) onNext?.();
+    if (isRightSwipe && hasPrev) onPrev?.();
+  };
+
+  const toggleDrawer = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setIsDrawerOpen(!isDrawerOpen);
+  };
+
+  if (!isOpen || !generatedImage) return null;
+
+  return (
+    <div
+      className="!fixed inset-0 !z-[150] flex flex-col md:flex-row animate-fadeIn"
+      style={{ backgroundColor: 'var(--modal-stage-bg, rgba(10,15,13,0.95))', color: 'var(--text-primary, #fff)', backdropFilter: 'blur(8px)' }}
+    >
+      {/* Left Panel: Image Viewer */}
+      <div
+        className="relative w-full h-full md:flex-1 flex items-center justify-center overflow-hidden pb-[60px] md:pb-0"
+        style={{ backgroundColor: 'var(--modal-stage-bg, transparent)' }}
+        onClick={onClose}
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+      >
+        {/* Navigation Arrows */}
+        {hasPrev && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onPrev?.(); }}
+            className="absolute left-4 top-1/2 -translate-y-1/2 z-40 p-3 text-white/50 bg-black/30 backdrop-blur-sm hover:text-white hover:bg-black/50 rounded-full transition-all border border-white/5"
+            aria-label="Previous Image"
+          >
+            <svg className="w-8 h-8 md:w-10 md:h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 19l-7-7 7-7" /></svg>
+          </button>
+        )}
+        {hasNext && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onNext?.(); }}
+            className="absolute right-4 top-1/2 -translate-y-1/2 z-40 p-3 text-white/50 bg-black/30 backdrop-blur-sm hover:text-white hover:bg-black/50 rounded-full transition-all border border-white/5"
+            aria-label="Next Image"
+          >
+            <svg className="w-8 h-8 md:w-10 md:h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5l7 7-7 7" /></svg>
+          </button>
+        )}
+
+        {/* Image Content */}
+        <div className="relative w-full h-full p-4 md:py-12 md:px-24 flex items-center justify-center" onClick={e => e.stopPropagation()}>
+          <div className="relative w-full h-full flex items-center justify-center">
+            {isCompareMode && originalImage ? (
+              <div
+                ref={containerRef}
+                className="relative h-full max-w-full aspect-[var(--aspect-ratio,auto)] select-none cursor-col-resize shadow-2xl mx-auto rounded-lg overflow-hidden"
+                style={{ aspectRatio: 'auto', borderColor: 'var(--border-color, #333)', borderWidth: 1 }}
+                onMouseDown={() => setIsDragging(true)}
+              >
+                <img src={generatedImage} className="max-w-full max-h-full object-contain pointer-events-none select-none block mx-auto" draggable={false} />
+                <div className="absolute inset-0 overflow-hidden" style={{ clipPath: `polygon(0 0, ${sliderPosition}% 0, ${sliderPosition}% 100%, 0 100%)` }}>
+                  <img src={originalImage} className="max-w-full max-h-full object-contain pointer-events-none select-none block mx-auto" draggable={false} />
+                </div>
+                <div className="absolute top-0 bottom-0 w-0.5 bg-[#7ed957] z-20 cursor-col-resize" style={{ left: `${sliderPosition}%` }}>
+                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 bg-[#7ed957] border-2 border-[#0a0f0d] rounded-full shadow-lg flex items-center justify-center">
+                    <svg className="w-4 h-4 text-[#0a0f0d]" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M8 9l4-4 4 4m0 6l-4 4-4-4" transform="rotate(90 12 12)" /></svg>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <img
+                src={generatedImage}
+                className="max-w-full max-h-full object-contain shadow-2xl rounded-lg border"
+                style={{ borderColor: 'var(--border-color, #333)' }}
+              />
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Right Panel: Sidebar / Drawer */}
+      <div
+        className={`fixed bottom-0 left-0 right-0 z-[160] shadow-2xl transition-all duration-300 ease-in-out md:static md:w-[400px] md:h-full md:border-t-0 md:border-l flex flex-col ${isDrawerOpen ? 'h-[80vh]' : 'h-[60px]'} md:h-full`}
+        style={{ backgroundColor: 'var(--modal-panel-bg, #1a201d)', borderColor: 'var(--border-color, #333)', borderTopWidth: 1 }}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (window.innerWidth < 768 && !isDrawerOpen) setIsDrawerOpen(true);
+        }}
+      >
+        {/* Sidebar Header */}
+        <div
+          className="flex items-center justify-between px-6 h-[60px] shrink-0 cursor-pointer md:cursor-default"
+          onClick={toggleDrawer}
+        >
+          <div className="flex items-center gap-2 text-[#7ed957]">
+            <div className="md:hidden">
+              {isDrawerOpen ? (
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" /></svg>
+              ) : (
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 15l7-7 7 7" /></svg>
+              )}
+            </div>
+            <span className="font-bold tracking-[0.2em] text-xs">DETAILS</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={(e) => { e.stopPropagation(); onClose(); }}
+              className="p-2 text-gray-400 hover:text-white hover:bg-white/10 rounded-md transition-all"
+              title="Close"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+          </div>
+        </div>
+
+        {/* Sidebar Content */}
+        <div
+          className="flex-1 overflow-y-auto p-6 custom-scrollbar min-h-0 space-y-6"
+          style={{ backgroundColor: 'var(--modal-panel-bg, #1a201d)' }}
+        >
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <h4 className="text-gray-500 text-[10px] uppercase tracking-widest font-bold">{promptLabel}</h4>
+              <button
+                onClick={handleCopy}
+                className="p-1.5 text-gray-400 hover:text-white hover:bg-white/10 rounded-md transition-all"
+                title="Copy Prompt"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+              </button>
+            </div>
+            <p className="text-white/75 font-mono text-[11px] leading-relaxed whitespace-pre-wrap selection:bg-[#7ed957] selection:text-[#0a0f0d]">
+              {displayedPrompt}
+            </p>
+          </div>
+
+          <div className="space-y-4 pt-4 border-t" style={{ borderColor: 'var(--border-color, #333)' }}>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <h4 className="text-gray-500 text-[10px] uppercase tracking-widest font-bold">Resolution</h4>
+                <p className="text-gray-300 font-mono text-xs">{resolution || 'Default'}</p>
+              </div>
+              <div className="space-y-1">
+                <h4 className="text-gray-500 text-[10px] uppercase tracking-widest font-bold">Aspect Ratio</h4>
+                <p className="text-gray-300 font-mono text-xs">{aspectRatio || 'Original'}</p>
+              </div>
+            </div>
+
+            {styleCode !== undefined && styleCode !== null && (
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-gray-500 text-[10px] uppercase tracking-widest font-bold">Style Seed</h4>
+                  <label className="flex items-center gap-1.5 cursor-pointer group">
+                    <div className="relative flex items-center">
+                      <input
+                        type="checkbox"
+                        checked={showFullPrompt}
+                        onChange={e => setShowFullPrompt(e.target.checked)}
+                        className="sr-only peer"
+                      />
+                      <div className="w-6 h-3 bg-gray-700 rounded-full peer-checked:bg-[#7ed957] transition-colors"></div>
+                      <div className="absolute left-0.5 w-2 h-2 bg-white rounded-full transition-transform peer-checked:translate-x-3"></div>
+                    </div>
+                    <span className="text-[8px] text-gray-500 font-bold uppercase group-hover:text-gray-300 transition-colors">Show full prompt</span>
+                  </label>
+                </div>
+                <p className="text-[#7ed957] font-mono text-xs">{styleCode}</p>
+              </div>
+            )}
+
+            {groundingMetadata && (
+              <div className="space-y-1">
+                <h4 className="text-gray-500 text-[10px] uppercase tracking-widest font-bold">Grounding</h4>
+                <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-[#7ed957]/10 text-[#7ed957] border border-[#7ed957]/20">
+                  Enabled
+                </span>
+              </div>
+            )}
+
+            {recipe && (
+              <div className="space-y-2 pt-2 border-t" style={{ borderColor: 'var(--border-color, #333)' }}>
+                <h4 className="text-gray-500 text-[10px] uppercase tracking-widest font-bold">Recipe</h4>
+                <div className="grid grid-cols-2 gap-2 text-[9px]">
+                  <div><span className="text-gray-500">Provider:</span> <span className="text-gray-300">{recipe.provider}</span></div>
+                  <div><span className="text-gray-500">Operace:</span> <span className="text-gray-300">{recipe.operation}</span></div>
+                  <div><span className="text-gray-500">Režim:</span> <span className="text-gray-300">{recipe.promptMode}</span></div>
+                  {recipe.styleStrength != null && (
+                    <div><span className="text-gray-500">Styl:</span> <span className="text-gray-300">{recipe.styleStrength}%</span></div>
+                  )}
+                  {recipe.upscaleFactor && (
+                    <div><span className="text-gray-500">Upscale:</span> <span className="text-gray-300">{recipe.upscaleFactor}×</span></div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Sidebar Footer (Actions) */}
+        <div
+          className="p-6 border-t flex flex-col gap-3 shrink-0"
+          style={{ backgroundColor: 'var(--modal-panel-bg, #1a201d)', borderColor: 'var(--border-color, #333)' }}
+        >
+          {originalImage && (
+            <button
+              onClick={() => setIsCompareMode(!isCompareMode)}
+              className={`w-full py-3 rounded-lg text-xs font-bold uppercase tracking-widest border transition-all ${isCompareMode ? 'bg-[#7ed957] text-[#0a0f0d] border-[#7ed957]' : 'bg-transparent text-gray-300 border-gray-700 hover:border-gray-500'}`}
+            >
+              {isCompareMode ? 'Exit Comparison' : 'Compare Original'}
+            </button>
+          )}
+          <button
+            onClick={handleDownload}
+            className="w-full py-3 rounded-lg text-xs font-bold uppercase tracking-widest border border-gray-700 bg-gray-800 text-gray-200 hover:bg-gray-700 hover:text-white transition-all shadow-lg active:scale-95"
+          >
+            Download Image
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
