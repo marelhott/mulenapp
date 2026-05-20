@@ -59,7 +59,7 @@ export const api = {
     outputCount: number;
     aspectRatio: 'original' | 'square' | 'portrait' | 'landscape';
     polishMode: 'focused' | 'balanced' | 'bold';
-    promptMode?: 'simple' | 'interpretation';
+    promptMode?: 'simple' | 'advanced';
     simpleLinkMode?: 'style' | 'merge' | 'object' | null;
     advancedVariant?: 'A' | 'B' | 'C';
     faceIdentityMode?: boolean;

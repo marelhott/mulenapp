@@ -134,10 +134,127 @@ function collectReferenceAssets(snapshot: WorkspaceSnapshot) {
     .slice(0, 2);
 }
 
+function buildSimpleLinkPrompt(
+  mode: 'style' | 'merge' | 'object',
+  extra: string,
+  sourceImageCount: number,
+  styleImageCount: number,
+  assetImageCount: number,
+) {
+  const header = `
+[LINK MODE: ${mode.toUpperCase()}]
+Images order: first ${sourceImageCount} input image(s), then ${styleImageCount} style image(s), then ${assetImageCount} proprietary asset image(s).
+`;
+
+  if (mode === 'style') {
+    return `${header}
+Apply the visual style, composition, lighting, color grading, lens feel, and overall mood from the style image(s) to the input image(s), while preserving the identity and content of the input subject(s). Do NOT transfer objects/content from style; transfer only aesthetic and photographic/artistic treatment.
+
+${extra ? `Additional instructions:\n${extra}\n` : ''}`.trim();
+  }
+
+  if (mode === 'merge') {
+    return `${header}
+Create a cohesive merge of input and style images. You may blend both aesthetic and content elements to produce a unified result that feels intentional, natural, and high quality. Use the style image(s) as a compositional template when helpful, but preserve the identity of subjects from the input image(s).
+
+${extra ? `Additional instructions:\n${extra}\n` : ''}`.trim();
+  }
+
+  return `${header}
+Transfer the dominant object/element from the style image(s) onto the input image(s) in a realistic way. Keep the input scene intact and place/replace the matching region with the style object, with correct perspective, lighting, scale, and shadows.
+
+${extra ? `Additional instructions:\n${extra}\n` : ''}`.trim();
+}
+
+function applyAdvancedInterpretation(userPrompt: string, variant: 'A' | 'B' | 'C', faceIdentityMode: boolean) {
+  const variantInstructions = {
+    A: `VARIANT A - CANDID EVERYDAY MOMENT:
+Create an unplanned, spontaneous snapshot from real life.
+
+CONTEXT PRESERVATION (CRITICAL):
+- Maintain the CORE THEME and ACTIVITY from the reference image
+- VARY the specific location and execution details, NOT the fundamental context
+- Natural, unposed body language and expression
+
+STYLE REQUIREMENTS:
+- Imperfect composition
+- Natural lighting only
+- Authentic environment
+- Candid expression
+- Slightly imperfect focus or framing`,
+    B: `VARIANT B - EDITORIAL PORTRAIT:
+Create a high-end magazine-quality portrait with professional production value.
+
+CONTEXT PRESERVATION (CRITICAL):
+- Maintain the CORE IDENTITY and ROLE from reference
+- Elevate the production quality and aesthetic, NOT the person's role or activity type
+
+STYLE REQUIREMENTS:
+- Perfect composition
+- Professional lighting
+- Shallow depth of field
+- Premium aesthetic
+- Polished, confident expression`,
+    C: `VARIANT C - PROFESSIONAL LIFESTYLE:
+Create a polished but believable real-world work scenario.
+
+CONTEXT PRESERVATION (CRITICAL):
+- Maintain the PROFESSION and ACTIVITY TYPE from reference
+- Professionalize and organize the setting, NOT change the fundamental work type
+
+STYLE REQUIREMENTS:
+- Natural but flattering light
+- Organized, professional environment
+- Person actively doing something
+- Professional but approachable expression`,
+  } as const;
+
+  const faceIdentityInstruction = `FACE IDENTITY PRESERVATION WITH CREATIVE VARIATION:
+
+PRESERVE:
+- Facial bone structure and skull geometry
+- Eye shape, spacing, and color
+- Nose proportions and shape
+- Mouth shape and lip proportions
+- Jawline and chin structure
+- Distinctive facial features
+- Overall facial proportions and symmetry
+- Skin tone and complexion
+
+ACTIVELY VARY:
+- Pose and camera angle
+- Facial expression and emotion
+- Clothing style and outfit
+- Hairstyle and grooming
+- Environment and background
+- Lighting setup
+- Activity or context
+- Color palette and mood
+- Time of day and season
+- Props and accessories`;
+
+  const parts = [userPrompt.trim(), `\n\n[INTERPRETATION INSTRUCTION - VARIANT ${variant}]`, variantInstructions[variant]];
+  if (faceIdentityMode) {
+    parts.push('\n\n[OVERRIDE - FACE IDENTITY PRESERVATION]');
+    parts.push(faceIdentityInstruction);
+  }
+  return parts.join('\n');
+}
+
 function composePhotoDirectorPrompt(input: Record<string, unknown>, snapshot: WorkspaceSnapshot, variationIndex: number) {
   const instruction = String(input.instruction || '').trim();
   const lockedText = String(input.lockedText || '').trim();
   const polishMode = String(input.polishMode || 'focused');
+  const promptMode = input.promptMode === 'advanced' ? 'advanced' : 'simple';
+  const simpleLinkMode =
+    input.simpleLinkMode === 'style' || input.simpleLinkMode === 'merge' || input.simpleLinkMode === 'object'
+      ? input.simpleLinkMode
+      : null;
+  const advancedVariant =
+    input.advancedVariant === 'A' || input.advancedVariant === 'B' || input.advancedVariant === 'C'
+      ? input.advancedVariant
+      : 'C';
+  const faceIdentityMode = Boolean(input.faceIdentityMode);
   const variationHint =
     Number(input.outputCount || 1) > 1 ? `Create variation ${variationIndex + 1} with a slightly distinct, but still controlled direction.` : '';
 
@@ -159,13 +276,22 @@ function composePhotoDirectorPrompt(input: Record<string, unknown>, snapshot: Wo
     .filter(Boolean)
     .join(' ');
 
+  let promptBody = instruction || 'improve the image carefully';
+  if (promptMode === 'simple' && simpleLinkMode) {
+    promptBody = buildSimpleLinkPrompt(simpleLinkMode, promptBody, 1, collectReferenceAssets(snapshot).length, 0);
+  } else if (promptMode === 'advanced') {
+    promptBody = applyAdvancedInterpretation(promptBody, advancedVariant, faceIdentityMode);
+  } else if (faceIdentityMode) {
+    promptBody = applyAdvancedInterpretation(promptBody, 'C', true);
+  }
+
   return [
     'You are Mulen Photo Director.',
     styleHint,
     'Keep the main subject, composition, identity, product silhouette, and realism stable.',
     lockedText ? `Locked elements that must not change: ${lockedText}.` : 'Locked elements should remain unchanged.',
     canonText,
-    instruction ? `Requested change: ${instruction}.` : 'Requested change: improve the image carefully.',
+    `Requested change: ${promptBody}.`,
     'Avoid changing the face, product, logo, text, and composition unless explicitly requested.',
     'Avoid AI-looking artifacts, broken geometry, extra objects, wrong branding, or text distortion.',
     variationHint,

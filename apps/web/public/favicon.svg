@@ -1,4 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="14" fill="#151515"/>
-  <path d="M18 42V20h6l8 11 8-11h6v22h-7V31l-7 9-7-9v11z" fill="#f7f7f3"/>
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background Circle (Black) -->
+  <circle cx="32" cy="32" r="32" fill="#0a0f0d"/>
+  
+  <!-- Sparkle/Star Icon (White) -->
+  <path d="M32 12L34.5 24.5L47 27L34.5 29.5L32 42L29.5 29.5L17 27L29.5 24.5L32 12Z" fill="white"/>
+  <path d="M48 38L49.5 44.5L56 46L49.5 47.5L48 54L46.5 47.5L40 46L46.5 44.5L48 38Z" fill="white" opacity="0.6"/>
+  <path d="M14 42L15 46L19 47L15 48L14 52L13 48L9 47L13 46L14 42Z" fill="white" opacity="0.4"/>
 </svg>
