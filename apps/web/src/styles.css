@@ -3915,36 +3915,36 @@ button.primary:hover {
 }
 
 .nano-generate-button {
-  min-height: 52px !important;
-  border-radius: 12px !important;
+  min-height: 40px !important;
+  border-radius: 8px !important;
   display: flex !important;
   flex-direction: row !important;
   align-items: center !important;
   justify-content: space-between !important;
-  padding: 0 20px !important;
-  background: #d6d6d6 !important;
-  border-color: #d6d6d6 !important;
-  color: #505050 !important;
+  padding: 0 16px !important;
+  background: rgba(115, 115, 115, 0.1) !important;
+  border: 0 !important;
+  color: rgba(26, 26, 26, 0.35) !important;
   grid-auto-rows: unset !important;
   text-transform: none !important;
 }
 
 .nano-generate-button.ready {
   background: #7ed957 !important;
-  border-color: #7ed957 !important;
+  border: 0 !important;
   color: #13210e !important;
-  box-shadow: 0 6px 18px rgba(126, 217, 87, 0.22) !important;
+  box-shadow: 0 4px 14px rgba(126, 217, 87, 0.2) !important;
 }
 
 .nano-generate-button.ready:hover:not(:disabled) {
-  background: #73cb4d !important;
-  box-shadow: 0 8px 22px rgba(126, 217, 87, 0.28) !important;
+  background: #8eeb68 !important;
+  box-shadow: 0 6px 20px rgba(126, 217, 87, 0.3) !important;
 }
 
 .nano-generate-button span {
-  font-size: 15px !important;
-  font-weight: 600 !important;
-  letter-spacing: 0.01em !important;
+  font-size: 14px !important;
+  font-weight: 400 !important;
+  letter-spacing: 0 !important;
   text-align: left !important;
   line-height: 1 !important;
   margin: 0 !important;
@@ -3965,9 +3965,9 @@ button.primary:hover {
   gap: 0 !important;
   margin-top: 6px !important;
   padding: 2px !important;
-  border-radius: 10px !important;
-  background: #ffffff !important;
-  border: 1px solid #e4e4de !important;
+  border-radius: 8px !important;
+  background: transparent !important;
+  border: 0 !important;
   overflow: hidden;
 }
 
@@ -4117,8 +4117,8 @@ button.primary:hover {
 }
 
 .nano-mini-actions button {
-  min-height: 32px !important;
-  border-radius: 7px !important;
+  min-height: 30px !important;
+  border-radius: 6px !important;
   background: transparent !important;
   border: 0 !important;
   display: flex !important;
@@ -4130,16 +4130,16 @@ button.primary:hover {
 }
 
 .nano-mini-actions button:hover {
-  background: #f7f7f4 !important;
+  background: rgba(115, 115, 115, 0.08) !important;
 }
 
 .nano-mini-actions button span {
-  font-size: 10px !important;
-  font-weight: 500 !important;
-  color: #242424 !important;
+  font-size: 12px !important;
+  font-weight: 400 !important;
+  color: #1a1a1a !important;
   text-align: center !important;
   line-height: 1.1 !important;
-  letter-spacing: -0.01em !important;
+  letter-spacing: 0 !important;
 }
 
 .nano-mini-actions button strong,
@@ -4148,7 +4148,7 @@ button.primary:hover {
 }
 
 .nano-mini-actions button:first-child {
-  background: #f3f3f1 !important;
+  background: rgba(115, 115, 115, 0.05) !important;
 }
 
 h1,
