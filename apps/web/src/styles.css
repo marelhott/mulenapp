@@ -3819,8 +3819,8 @@ button.primary:hover {
   border: none;
   background: transparent;
   color: #4c5663;
-  font-size: 12px;
-  font-weight: 500;
+  font-size: 16px;
+  font-weight: 400;
   cursor: pointer;
   transition: all 120ms ease;
   width: 100%;
@@ -3845,7 +3845,7 @@ button.primary:hover {
 .sidebar-menu-item.active {
   background: rgba(0, 0, 0, 0.06);
   color: #0f1311;
-  font-weight: 600;
+  font-weight: 400;
 }
 
 .app-shell-dark .sidebar-menu-item.active {

@@ -36,11 +36,8 @@ export function ModuleRail(props: {
             aria-label={props.collapsed ? 'Rozbalit navigaci' : 'Sbalit navigaci'}
             aria-pressed={props.collapsed}
           >
-            <svg width="33" height="33" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <rect x="3.5" y="4.5" width="17" height="15" rx="4.5" stroke="currentColor" strokeWidth="1.75" />
-              <path d="M11 5.3v13.4" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
-              <path d="M7.25 9.25v5.5" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
-              <path d={props.collapsed ? 'm15.5 12-2.6-2.35v4.7L15.5 12Z' : 'm12.5 12 2.6-2.35v4.7L12.5 12Z'} fill="currentColor" stroke="currentColor" strokeWidth="0.2" strokeLinejoin="round" />
+            <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M19 2H5C2.243 2 0 4.243 0 7V17C0 19.757 2.243 22 5 22H19C21.757 22 24 19.757 24 17V7C24 4.243 21.757 2 19 2ZM2 17V7C2 5.346 3.346 4 5 4H9V20H5C3.346 20 2 18.654 2 17ZM22 17C22 18.654 20.654 20 19 20H11V4H19C20.654 4 22 5.346 22 7V17ZM7 11C7 11.553 6.553 12 6 12H5C4.447 12 4 11.553 4 11C4 10.447 4.447 10 5 10H6C6.553 10 7 10.447 7 11ZM7 15C7 15.553 6.553 16 6 16H5C4.447 16 4 15.553 4 15C4 14.447 4.447 14 5 14H6C6.553 14 7 14.447 7 15ZM4 7C4 6.447 4.447 6 5 6H6C6.553 6 7 6.447 7 7C7 7.553 6.553 8 6 8H5C4.447 8 4 7.553 4 7Z" fill="currentColor" />
             </svg>
           </button>
         </div>
