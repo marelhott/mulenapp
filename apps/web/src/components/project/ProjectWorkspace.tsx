@@ -1338,7 +1338,6 @@ function UploadSection(props: {
           <em>Select image</em>
         </span>
       </button>
-      {props.helper ? <p>{props.helper}</p> : null}
     </section>
   );
 }
