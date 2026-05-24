@@ -3966,7 +3966,7 @@ button.primary:hover {
   display: grid !important;
   grid-template-columns: 1fr 1fr !important;
   gap: 0 !important;
-  margin-top: 6px !important;
+  margin-top: 0 !important;
   padding: 2px !important;
   border-radius: 8px !important;
   background: transparent !important;
@@ -4151,7 +4151,7 @@ button.primary:hover {
 }
 
 .nano-mini-actions button:first-child {
-  background: rgba(115, 115, 115, 0.05) !important;
+  background: #ffffff !important;
 }
 
 h1,
