@@ -3843,7 +3843,7 @@ button.primary:hover {
 }
 
 .sidebar-menu-item.active {
-  background: rgba(0, 0, 0, 0.06);
+  background: transparent;
   color: #0f1311;
   font-weight: 400;
 }
