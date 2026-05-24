@@ -4449,10 +4449,12 @@ select,
   border-color: #e7e7e1 !important;
 }
 
-.nano-model-select-trigger,
-.nano-prompt-surface,
+.nano-prompt-surface {
+  border-color: rgba(16, 16, 16, 0.1) !important;
+}
+
 .nano-upload-box {
-  border-color: #e4e4de !important;
+  border-color: rgba(16, 16, 16, 0.2) !important;
 }
 
 .nano-reference-card {
