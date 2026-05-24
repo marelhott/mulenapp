@@ -4436,9 +4436,15 @@ select,
 }
 
 .nano-mini-actions,
-.nano-model-select-trigger,
+.nano-model-select-trigger {
+  background: rgba(115, 115, 115, 0.05) !important;
+}
+
 .nano-model-select-trigger:hover,
-.nano-model-select-trigger.open,
+.nano-model-select-trigger.open {
+  background: rgba(115, 115, 115, 0.09) !important;
+}
+
 .nano-prompt-surface,
 .nano-count-row {
   background: transparent !important;
