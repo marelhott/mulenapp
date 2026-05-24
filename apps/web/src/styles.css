@@ -3973,19 +3973,19 @@ button.primary:hover {
 
 .nano-model-select-block p {
   margin: 0;
-  font-size: 7px;
-  font-weight: 900;
-  letter-spacing: 0.12em;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: normal;
   text-transform: uppercase;
-  color: #5a5a5a;
+  color: #616161;
 }
 
 .nano-model-select-trigger {
-  min-height: 34px !important;
-  border-radius: 12px !important;
-  background: #ffffff !important;
-  border: 1px solid #e1e1e1 !important;
-  color: #5f615c !important;
+  min-height: 32px !important;
+  border-radius: 8px !important;
+  background: rgba(115, 115, 115, 0.05) !important;
+  border: 1px solid rgba(16, 16, 16, 0.1) !important;
+  color: #1a1a1a !important;
   display: grid !important;
   grid-template-columns: auto 1fr auto;
   align-items: center !important;
@@ -4003,7 +4003,7 @@ button.primary:hover {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: #5f615c;
+  color: #1a1a1a;
 }
 
 .nano-model-select-copy {
@@ -4013,17 +4013,17 @@ button.primary:hover {
 }
 
 .nano-model-select-copy strong {
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: #5f615c;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: #1a1a1a;
 }
 
 .nano-model-select-chevron {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: #5f615c;
+  color: #616161;
 }
 
 .nano-model-select-leading svg {
