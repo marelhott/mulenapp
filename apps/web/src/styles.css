@@ -813,15 +813,15 @@ button.primary:hover {
 }
 
 .nano-generate-button span {
-  font-size: 20px;
-  font-weight: 900;
+  font-size: 14px;
+  font-weight: 400;
   line-height: 1;
-  letter-spacing: 0.08em;
+  letter-spacing: 0;
 }
 
 .nano-generate-button small {
   margin-top: 3px;
-  font-size: 8px;
+  font-size: 11px;
   color: rgba(227, 229, 223, 0.9);
 }
 
@@ -838,12 +838,12 @@ button.primary:hover {
 .nano-mini-actions button,
 .nano-model-grid button,
 .nano-chip-grid button {
-  min-height: 38px;
-  border-radius: 12px;
-  background: #fbfbf7;
+  min-height: 32px;
+  border-radius: 8px;
+  background: #f8f8f6;
   border-color: rgba(47, 58, 52, 0.1);
   color: #333934;
-  font-size: 9px;
+  font-size: 12px;
   line-height: 1.15;
 }
 
@@ -853,16 +853,16 @@ button.primary:hover {
 }
 
 .nano-mini-actions button strong {
-  font-size: 9px;
-  font-weight: 900;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
   color: #2d322f;
 }
 
 .nano-mini-actions button small {
   margin-top: 4px;
-  font-size: 8px;
+  font-size: 11px;
   color: #4d5450;
 }
 
@@ -871,9 +871,9 @@ button.primary:hover {
 .nano-upload-heading strong,
 .nano-prompt-header strong {
   margin: 0;
-  font-size: 7px;
-  font-weight: 900;
-  letter-spacing: 0.12em;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
   color: #5f5f5f;
 }
@@ -886,16 +886,16 @@ button.primary:hover {
 }
 
 .nano-count-row button {
-  min-height: 26px;
+  min-height: 32px;
   padding: 0;
   background: transparent;
   border: 0;
   border-bottom: 2px solid transparent;
   border-radius: 0;
   color: #2f3531;
-  font-size: 10px;
-  font-weight: 500;
-  letter-spacing: 0.01em;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0;
 }
 
 .nano-count-row button.active {
@@ -910,9 +910,9 @@ button.primary:hover {
 
 .nano-prompt-label strong {
   margin: 0;
-  font-size: 7px;
-  font-weight: 900;
-  letter-spacing: 0.12em;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
   color: #5f5f5f;
 }
@@ -1249,8 +1249,8 @@ button.primary:hover {
 
 .nano-upload-heading span {
   color: #484f4a;
-  font-size: 9px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 400;
 }
 
 .nano-upload-box {
@@ -1288,7 +1288,7 @@ button.primary:hover {
 .nano-upload-section p {
   margin: 8px 0 0;
   color: #434a45;
-  font-size: 9px;
+  font-size: 12px;
   line-height: 1.45;
 }
 
