@@ -2368,23 +2368,23 @@ button.primary:hover {
 
 
 .nano-route-panel .section-heading {
-  font-size: 8px;
+  font-size: 10px;
   margin-bottom: 10px;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.06em;
 }
 
 .nano-route-panel .panel-block label {
-  font-size: 8px;
+  font-size: 10px;
   gap: 6px;
   margin-bottom: 10px;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.06em;
 }
 
 .nano-route-panel .panel-block textarea,
 .nano-route-panel .panel-block input,
 .nano-route-panel .panel-block select {
-  font-size: 8px;
-  line-height: 1.35;
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .nano-route-panel .panel-block textarea {
@@ -2395,17 +2395,19 @@ button.primary:hover {
 .nano-route-panel .segmented-control button,
 .nano-route-panel .variant-tags span,
 .nano-route-panel .canon-list span {
-  font-size: 7px;
-  letter-spacing: 0.1em;
+  font-size: 12px;
+  letter-spacing: 0;
 }
 
 .nano-route-panel .button-row button,
 .nano-route-panel .button-row .primary {
-  min-height: 42px;
-  font-size: 8px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  padding: 0 14px;
+  min-height: 40px;
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  padding: 0 16px;
+  border-radius: 8px;
 }
 
 .nano-route-panel .module-note,
@@ -2883,8 +2885,8 @@ button.primary:hover {
 .section-heading {
   color: var(--text-secondary);
   font-size: 10px;
-  font-weight: 900;
-  letter-spacing: 0.18em;
+  font-weight: 600;
+  letter-spacing: 0.06em;
   margin-bottom: 12px;
   text-transform: uppercase;
 }
@@ -2978,9 +2980,9 @@ button.primary:hover {
 .panel-block label {
   display: grid;
   gap: 7px;
-  font-size: 9px;
-  font-weight: 900;
-  letter-spacing: 0.14em;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
   color: var(--text-secondary);
   text-transform: uppercase;
   margin-bottom: 12px;
@@ -2991,12 +2993,12 @@ button.primary:hover {
 .panel-block select {
   width: 100%;
   border: 1px solid var(--border-color);
-  border-radius: 12px;
-  padding: 10px 12px;
-  background: #fbfbf7;
-  color: #333934;
+  border-radius: 8px;
+  padding: 8px 12px;
+  background: #f8f8f6;
+  color: #1a1f1c;
   outline: none;
-  font-size: 9px;
+  font-size: 12px;
   line-height: 1.45;
 }
 
@@ -3024,12 +3026,12 @@ button.primary:hover {
 }
 
 .segment {
-  min-height: 32px;
+  min-height: 30px;
   padding: 0 10px;
-  font-size: 8px;
-  font-weight: 900;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .segment.active {
@@ -3129,10 +3131,10 @@ button.primary:hover {
 }
 
 .upload-slot span {
-  font-size: 8px;
-  font-weight: 900;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .asset-library-anchor {
