@@ -1,236 +1,178 @@
 import type { NanoRoute } from '../../types/nano';
 
-export type RailPreview = {
-  imageUrl: string;
-  caption: string;
-};
-
 export type RailInfo = {
   eyebrow: string;
   title: string;
   shortLabel: string;
   description: string;
   bullets: string[];
-  previews: RailPreview[];
+  previews: Array<{
+    caption: string;
+    imageUrl: string;
+  }>;
 };
-
-const commonMainPreviewSet: RailPreview[] = [
-  {
-    imageUrl: 'https://images.unsplash.com/photo-1511499767150-a48a237f0083?auto=format&fit=crop&w=600&q=80',
-    caption: 'before / after',
-  },
-  {
-    imageUrl: 'https://images.unsplash.com/photo-1491553895911-0055eca6402d?auto=format&fit=crop&w=600&q=80',
-    caption: 'product polish',
-  },
-  {
-    imageUrl: 'https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=600&q=80',
-    caption: 'clean scene',
-  },
-  {
-    imageUrl: 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=600&q=80',
-    caption: 'premium output',
-  },
-  {
-    imageUrl: 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=600&q=80',
-    caption: 'detail pass',
-  },
-  {
-    imageUrl: 'https://images.unsplash.com/photo-1527443154391-507e9dc6c5cc?auto=format&fit=crop&w=600&q=80',
-    caption: 'quality',
-  },
-  {
-    imageUrl: 'https://images.unsplash.com/photo-1518005020951-eccb494ad742?auto=format&fit=crop&w=600&q=80',
-    caption: 'sharp edge',
-  },
-  {
-    imageUrl: 'https://images.unsplash.com/photo-1500534314209-a25ddb2bd429?auto=format&fit=crop&w=600&q=80',
-    caption: 'social crop',
-  },
-  {
-    imageUrl: 'https://images.unsplash.com/photo-1517048676732-d65bc937f952?auto=format&fit=crop&w=600&q=80',
-    caption: 'final frame',
-  },
-  {
-    imageUrl: 'https://images.unsplash.com/photo-1516321497487-e288fb19713f?auto=format&fit=crop&w=600&q=80',
-    caption: 'export set',
-  },
-];
 
 export const RAIL_INFO: Record<NanoRoute, RailInfo> = {
   mulen: {
-    eyebrow: 'MODULE',
+    eyebrow: 'Core Module',
     title: 'Photo Director',
-    shortLabel: 'MAIN',
-    description:
-      'Hlavni rezim pro ladeni jedne fotky. Slouzi k uprave svetla, pozadi, kompozice a finalniho vzhledu.',
+    shortLabel: 'Main',
+    description: 'AI-powered photo editing with precise control over composition, lighting, and style.',
     bullets: [
-      'vylepseni jedne hlavni fotky',
-      'zachovani produktu a identity',
-      'finalni polish pro premium vystup',
+      'Preserve product identity and composition',
+      'Advanced locked area support',
+      'Visual canon consistency',
+      'Multiple generation modes',
     ],
-    previews: commonMainPreviewSet,
-  },
-  'ai-upscaler': {
-    eyebrow: 'MODULE',
-    title: 'AI Upscaler',
-    shortLabel: 'SCALE',
-    description:
-      'Rezim pro zvetseni a doostreni obrazku. Hodi se pro vyssi kvalitu, export a kontrolu detailu.',
-    bullets: ['upscale do 2K nebo 4K', 'ostrejsi hrany a detaily', 'focus na cely obraz, tvar nebo produkt'],
     previews: [
       {
-        imageUrl: 'https://images.unsplash.com/photo-1511499767150-a48a237f0083?auto=format&fit=crop&w=600&q=80',
-        caption: 'detail',
+        caption: 'Original',
+        imageUrl: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=400&h=300&fit=crop',
       },
       {
-        imageUrl: 'https://images.unsplash.com/photo-1518005020951-eccb494ad742?auto=format&fit=crop&w=600&q=80',
-        caption: 'sharpness',
+        caption: 'Enhanced',
+        imageUrl: 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=400&h=300&fit=crop',
+      },
+    ],
+  },
+  'ai-upscaler': {
+    eyebrow: 'Enhancement',
+    title: 'AI Upscaler',
+    shortLabel: 'Scale',
+    description: 'Upscale images while preserving quality and details using advanced AI models.',
+    bullets: [
+      'Up to 4x resolution increase',
+      'Detail preservation',
+      'Artifact removal',
+      'Batch processing support',
+    ],
+    previews: [
+      {
+        caption: 'Low Res',
+        imageUrl: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=200&h=200&fit=crop',
       },
       {
-        imageUrl: 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=600&q=80',
-        caption: '2K / 4K',
+        caption: 'Upscaled',
+        imageUrl: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=400&h=400&fit=crop',
       },
-      {
-        imageUrl: 'https://images.unsplash.com/photo-1527443154391-507e9dc6c5cc?auto=format&fit=crop&w=600&q=80',
-        caption: 'export quality',
-      },
-      ...commonMainPreviewSet.slice(0, 6),
     ],
   },
   'face-swap': {
-    eyebrow: 'MODULE',
+    eyebrow: 'Identity',
     title: 'Face Swap',
-    shortLabel: 'FACE',
-    description:
-      'Rezim pro vymenu obliceje nebo identity v obrazku. Pracuje se source face a target scenou.',
-    bullets: ['nahrani zdrojove tvare', 'pouziti na cilovy obrazek', 'vice variant pro vyber'],
+    shortLabel: 'Face',
+    description: 'Swap faces while maintaining natural expressions and lighting.',
+    bullets: [
+      'Expression preservation',
+      'Lighting adaptation',
+      'High-quality blending',
+      'Multiple face support',
+    ],
     previews: [
       {
-        imageUrl: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=600&q=80',
-        caption: 'source',
+        caption: 'Source',
+        imageUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&h=300&fit=crop',
       },
       {
-        imageUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=600&q=80',
-        caption: 'target',
+        caption: 'Swapped',
+        imageUrl: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=400&h=300&fit=crop',
       },
-      {
-        imageUrl: 'https://images.unsplash.com/photo-1527980965255-d3b416303d12?auto=format&fit=crop&w=600&q=80',
-        caption: 'variant',
-      },
-      {
-        imageUrl: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=600&q=80',
-        caption: 'selection',
-      },
-      ...commonMainPreviewSet.slice(0, 6),
     ],
   },
   reframe: {
-    eyebrow: 'MODULE',
-    title: 'Reframe',
-    shortLabel: 'FRAME',
-    description:
-      'Rezim pro vytvoreni vice zaberu z jednoho obrazku. Pomaha udelat ruzne uhly, vyrezy a formaty.',
-    bullets: ['vice kompozic z jednoho zdroje', 'social, web nebo produktove vyrezy', 'zachovani hlavniho motivu'],
+    eyebrow: 'Perspective',
+    title: 'Multi-Angle Reframe',
+    shortLabel: 'Frame',
+    description: 'Generate multiple camera angles and perspectives from a single image.',
+    bullets: [
+      'Dynamic angle generation',
+      'Perspective control',
+      'Composition variants',
+      'Professional framing',
+    ],
     previews: [
       {
-        imageUrl: 'https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=600&q=80',
-        caption: 'wide',
+        caption: 'Front',
+        imageUrl: 'https://images.unsplash.com/photo-1560769629-975ec94e6a86?w=400&h=300&fit=crop',
       },
       {
-        imageUrl: 'https://images.unsplash.com/photo-1491553895911-0055eca6402d?auto=format&fit=crop&w=600&q=80',
-        caption: 'product',
+        caption: 'Angle',
+        imageUrl: 'https://images.unsplash.com/photo-1572635196237-14b3f281503f?w=400&h=300&fit=crop',
       },
-      {
-        imageUrl: 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=600&q=80',
-        caption: 'square',
-      },
-      {
-        imageUrl: 'https://images.unsplash.com/photo-1500534314209-a25ddb2bd429?auto=format&fit=crop&w=600&q=80',
-        caption: 'social crop',
-      },
-      ...commonMainPreviewSet.slice(0, 6),
     ],
   },
   'variant-lab': {
-    eyebrow: 'MODULE',
+    eyebrow: 'Exploration',
     title: 'Variant Lab',
-    shortLabel: 'VAR',
-    description:
-      'Laborator pro rychle generovani variant obrazku. Slouzi k hledani novych vizualnich smeru.',
-    bullets: ['vice verzi najednou', 'ruzne styly a intenzity', 'porovnani proti originalu'],
+    shortLabel: 'Var',
+    description: 'Generate multiple creative variations while maintaining brand consistency.',
+    bullets: [
+      'Creative exploration',
+      'Style consistency',
+      'Batch generation',
+      'Quality scoring',
+    ],
     previews: [
       {
-        imageUrl: 'https://images.unsplash.com/photo-1491553895911-0055eca6402d?auto=format&fit=crop&w=600&q=80',
-        caption: 'base',
+        caption: 'Variant A',
+        imageUrl: 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=300&h=300&fit=crop',
       },
       {
-        imageUrl: 'https://images.unsplash.com/photo-1511499767150-a48a237f0083?auto=format&fit=crop&w=600&q=80',
-        caption: 'variant 01',
+        caption: 'Variant B',
+        imageUrl: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=300&h=300&fit=crop',
       },
       {
-        imageUrl: 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=600&q=80',
-        caption: 'variant 02',
+        caption: 'Variant C',
+        imageUrl: 'https://images.unsplash.com/photo-1525966222134-fcfa99b8ae77?w=300&h=300&fit=crop',
       },
       {
-        imageUrl: 'https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=600&q=80',
-        caption: 'variant 03',
+        caption: 'Variant D',
+        imageUrl: 'https://images.unsplash.com/photo-1572635196237-14b3f281503f?w=300&h=300&fit=crop',
       },
-      ...commonMainPreviewSet.slice(0, 6),
     ],
   },
   'visual-guide': {
-    eyebrow: 'MODULE',
+    eyebrow: 'Workflow',
     title: 'Visual Guide',
-    shortLabel: 'GUIDE',
-    description:
-      'Rezim pro tvorbu vizualniho navodu krok za krokem. Z promptu vytvori konzistentni serii obrazku.',
-    bullets: ['navod v nekolika krocich', 'jednotny vizualni styl', 'vhodne pro carousel, PDF, blog nebo web'],
+    shortLabel: 'Guide',
+    description: 'Step-by-step visual guidance for complex editing workflows.',
+    bullets: [
+      'Guided workflows',
+      'Step tracking',
+      'Quality evaluation',
+      'Best practice templates',
+    ],
     previews: [
       {
-        imageUrl: 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=600&q=80',
-        caption: 'step 01',
+        caption: 'Step 1',
+        imageUrl: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=400&h=300&fit=crop',
       },
       {
-        imageUrl: 'https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?auto=format&fit=crop&w=600&q=80',
-        caption: 'step 02',
+        caption: 'Step 2',
+        imageUrl: 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=400&h=300&fit=crop',
       },
-      {
-        imageUrl: 'https://images.unsplash.com/photo-1499750310107-5fef28a66643?auto=format&fit=crop&w=600&q=80',
-        caption: 'step 03',
-      },
-      {
-        imageUrl: 'https://images.unsplash.com/photo-1517048676732-d65bc937f952?auto=format&fit=crop&w=600&q=80',
-        caption: 'final',
-      },
-      ...commonMainPreviewSet.slice(0, 6),
     ],
   },
   infographic: {
-    eyebrow: 'MODULE',
+    eyebrow: 'Design',
     title: 'Infographic Generator',
-    shortLabel: 'INFO',
-    description:
-      'Rezim pro tvorbu infografik. Vystup ma byt skutecny layout s textem, ne jen obrazek z image modelu.',
-    bullets: ['edukativni nebo business infografika', 'realny text a sekce', 'formaty A4, square, story nebo wide'],
+    shortLabel: 'Info',
+    description: 'Create professional infographics from data and text inputs.',
+    bullets: [
+      'Template library',
+      'Data visualization',
+      'Custom branding',
+      'Export to multiple formats',
+    ],
     previews: [
       {
-        imageUrl: 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&w=600&q=80',
-        caption: 'data',
+        caption: 'Timeline',
+        imageUrl: 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=400&h=300&fit=crop',
       },
       {
-        imageUrl: 'https://images.unsplash.com/photo-1460925895917-afdab827c52f?auto=format&fit=crop&w=600&q=80',
-        caption: 'layout',
+        caption: 'Metrics',
+        imageUrl: 'https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=400&h=300&fit=crop',
       },
-      {
-        imageUrl: 'https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?auto=format&fit=crop&w=600&q=80',
-        caption: 'business',
-      },
-      {
-        imageUrl: 'https://images.unsplash.com/photo-1516321497487-e288fb19713f?auto=format&fit=crop&w=600&q=80',
-        caption: 'export',
-      },
-      ...commonMainPreviewSet.slice(0, 6),
     ],
   },
 };

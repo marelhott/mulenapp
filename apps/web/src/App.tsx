@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { mockWorkspaceSnapshot, type WorkspaceSnapshot } from '@mulen/shared';
 import { ModuleRail } from './components/project/moduleRail';
-import { NanoHeader } from './components/project/NanoHeader';
 import { ProjectWorkspace } from './components/project/ProjectWorkspace';
 import type { NanoRoute } from './types/nano';
 import { api, type ApiConfig } from './lib/api';
@@ -13,6 +12,10 @@ export function App() {
   const [snapshot, setSnapshot] = useState<WorkspaceSnapshot>(mockWorkspaceSnapshot);
   const [apiConfig, setApiConfig] = useState<ApiConfig | null>(null);
   const [loadingError, setLoadingError] = useState<string | null>(null);
+  const [isRailCollapsed, setIsRailCollapsed] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.localStorage.getItem('mulen-rail-collapsed') === 'true';
+  });
   const [theme, setTheme] = useState<AppTheme>(() => {
     if (typeof window === 'undefined') return 'light';
     const savedTheme = window.localStorage.getItem('mulen-theme');
@@ -22,6 +25,10 @@ export function App() {
   useEffect(() => {
     window.localStorage.setItem('mulen-theme', theme);
   }, [theme]);
+
+  useEffect(() => {
+    window.localStorage.setItem('mulen-rail-collapsed', String(isRailCollapsed));
+  }, [isRailCollapsed]);
 
   useEffect(() => {
     let active = true;
@@ -52,13 +59,8 @@ export function App() {
 
   return (
     <div className={theme === 'dark' ? 'app-shell app-shell-dark' : 'app-shell app-shell-light'}>
-      <NanoHeader
-        brand="Mulen Photo Director"
-        theme={theme}
-        onToggleTheme={() => setTheme((currentTheme) => (currentTheme === 'light' ? 'dark' : 'light'))}
-      />
-      <div className="app-frame">
-        <ModuleRail activeRoute={activeRoute} onSelectRoute={setActiveRoute} />
+      <div className={isRailCollapsed ? 'app-frame sidebar-collapsed' : 'app-frame'}>
+        <ModuleRail activeRoute={activeRoute} onSelectRoute={setActiveRoute} collapsed={isRailCollapsed} onToggleCollapsed={() => setIsRailCollapsed((current) => !current)} />
         <ProjectWorkspace
           activeRoute={activeRoute}
           snapshot={snapshot}

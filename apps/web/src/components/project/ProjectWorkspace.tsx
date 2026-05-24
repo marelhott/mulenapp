@@ -1,5 +1,5 @@
 import { startTransition, useEffect, useRef, useState, useMemo } from 'react';
-import { PanelRight } from 'lucide-react';
+import { BadgePlus, BookOpen, ChevronDown, Flower2, Grid2x2, ImageIcon, ImageUp, List, PanelRight, Sparkles, Square, UserRound } from 'lucide-react';
 import type {
   Asset,
   EditStep,
@@ -134,6 +134,44 @@ function getAsset(snapshot: WorkspaceSnapshot, version: ImageVersion): Asset | u
   return snapshot.assets.find((asset) => asset.id === version.assetId);
 }
 
+function formatRelativeTimeLabel(createdAt: string) {
+  const diffMs = Math.max(0, Date.now() - Date.parse(createdAt));
+  const minutes = Math.floor(diffMs / 60000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+  const days = Math.floor(hours / 24);
+  return `${days} day${days === 1 ? '' : 's'} ago`;
+}
+
+function formatAspectRatioLabel(value?: unknown) {
+  switch (value) {
+    case 'square':
+      return '1:1';
+    case 'portrait':
+      return '3:4';
+    case 'landscape':
+      return '4:3';
+    case 'original':
+    default:
+      return '3:4';
+  }
+}
+
+function formatModelBadge(model?: string) {
+  if (!model) return 'google nano banana 2';
+  if (model.includes('precise') || model.includes('balanced')) return 'google nano banana 2';
+  if (model.includes('gemini')) return 'google nano banana 2';
+  if (model.includes('openai')) return 'gpt image';
+  return model.replace(/-/g, ' ');
+}
+
+function formatSpeedBadge(polishMode?: unknown) {
+  if (polishMode === 'bold') return 'exploring';
+  return 'thinking fast';
+}
+
 function MainCanvas(props: {
   snapshot: WorkspaceState;
   activeRoute: NanoRoute;
@@ -257,164 +295,98 @@ function MainCanvas(props: {
     | { title?: string; theme?: 'light' | 'dark'; sections?: Array<{ title: string; body: string }> }
     | undefined;
 
-  const successImages = sessionImages.filter(img => img.status === 'success' && img.url);
-
   const emptyMarkDots = Array.from({ length: 17 }, (_, index) => index + 1);
-  const outputCards = sessionImages;
+  const photoDirectorJobs = useMemo(
+    () =>
+      props.snapshot.jobs
+        .filter((job) => job.module === 'photo-director')
+        .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)),
+    [props.snapshot.jobs],
+  );
 
-  const renderNanoOutputCard = (image: typeof sessionImages[number]) => {
-    const editPrompt = editPrompts[image.id] ?? image.prompt;
-    const showInlineEditor = image.status === 'success' && image.url && outputCards.length === 1;
+  const creationRows = useMemo(() => {
+    const rows = photoDirectorJobs
+      .map((job) => {
+        const versions = job.outputVersionIds
+          .map((versionId) => props.snapshot.versions.find((version) => version.id === versionId))
+          .filter(Boolean) as ImageVersion[];
+        const cards = versions
+          .map((version) => {
+            const asset = getAsset(props.snapshot, version);
+            if (!asset || asset.mimeType === 'text/html') return null;
+            return {
+              id: version.id,
+              versionId: version.id,
+              url: asset.url,
+              label: version.label,
+              resolution: String(asset.metadata?.resolution ?? '2K'),
+            };
+          })
+          .filter(Boolean) as Array<{ id: string; versionId: string; url: string; label?: string; resolution: string }>;
 
-    const removeImage = () => {
-      setSessionImages((prev) => prev.filter((img) => img.id !== image.id));
-      setEditPrompts((prev) => {
-        const next = { ...prev };
-        delete next[image.id];
-        return next;
+        if (cards.length === 0) return null;
+
+        const firstVersion = versions[0];
+        const firstRun = props.snapshot.modelRuns.find((run) => run.jobId === job.id);
+        const prompt =
+          (typeof job.input.instruction === 'string' && job.input.instruction.trim()) ||
+          firstRun?.inputPrompt ||
+          firstVersion?.prompt ||
+          'Untitled generation';
+        const polishMode =
+          (typeof job.input.polishMode === 'string' && job.input.polishMode) ||
+          firstVersion?.metadata?.polishMode;
+
+        return {
+          id: job.id,
+          prompt,
+          createdAt: job.createdAt,
+          aspectRatio: formatAspectRatioLabel(firstVersion?.metadata?.aspectRatio),
+          modelLabel: formatModelBadge(firstRun?.model),
+          speedLabel: formatSpeedBadge(polishMode),
+          cards,
+        };
+      })
+      .filter(Boolean) as Array<{
+      id: string;
+      prompt: string;
+      createdAt: string;
+      aspectRatio: string;
+      modelLabel: string;
+      speedLabel: string;
+      cards: Array<{ id: string; versionId: string; url: string; label?: string; resolution: string }>;
+    }>;
+
+    if (props.isGenerating) {
+      rows.unshift({
+        id: 'pending-generation',
+        prompt: props.snapshot.photoDirectorInstruction || 'Generating...',
+        createdAt: new Date().toISOString(),
+        aspectRatio: formatAspectRatioLabel(props.snapshot.photoDirectorAspectRatio),
+        modelLabel: 'google nano banana 2',
+        speedLabel: formatSpeedBadge(props.snapshot.photoDirectorPolishMode),
+        cards: Array.from({ length: props.generatingCount ?? 1 }, (_, index) => ({
+          id: `pending-card-${index}`,
+          versionId: '',
+          url: '',
+          label: 'Generating',
+          resolution: '2K',
+        })),
       });
-      setShowReferenceUpload((prev) => {
-        const next = { ...prev };
-        delete next[image.id];
-        return next;
-      });
-    };
+    }
 
-    return (
-      <article className="nano-main-result-card" key={image.id}>
-        <div
-          className="nano-main-result-visual"
-          onClick={() => image.status === 'success' && image.versionId && setZoomedVersionId(image.versionId)}
-        >
-          {image.status === 'loading' ? (
-            <div className="nano-main-result-loading">
-              <div className="nano-main-result-progress">
-                <div className="nano-main-result-progress-fill" />
-              </div>
-              <span>Generuji...</span>
-            </div>
-          ) : image.status === 'error' ? (
-            <div className="nano-main-result-error">
-              <p>{image.error || 'Generovani selhalo'}</p>
-            </div>
-          ) : image.url ? (
-            <img
-              src={image.url}
-              alt={image.prompt || 'Vygenerovany obrazek'}
-              className="nano-main-result-image"
-              decoding="sync"
-            />
-          ) : null}
-        </div>
-
-        <div className="nano-main-result-footer">
-          <p title={image.prompt}>{image.prompt || props.snapshot.photoDirectorInstruction || '(bez promptu)'}</p>
-          <div className="nano-main-result-actions">
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                navigator.clipboard?.writeText(image.prompt);
-              }}
-              title="Kopirovat prompt"
-              disabled={image.status === 'loading'}
-            >
-              <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
-            </button>
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                if (image.status !== 'success') return;
-                setEditPrompts((prev) => ({
-                  ...prev,
-                  [image.id]: prev[image.id] ?? image.prompt,
-                }));
-              }}
-              title="Upravit prompt"
-              disabled={image.status !== 'success'}
-            >
-              <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-            </button>
-            {image.url ? (
-              <a
-                href={image.url}
-                download
-                onClick={(event) => event.stopPropagation()}
-                title="Stahnout"
-              >
-                <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 3v12m0 0l4-4m-4 4l-4-4M4 17v1a3 3 0 003 3h10a3 3 0 003-3v-1" /></svg>
-              </a>
-            ) : null}
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                removeImage();
-              }}
-              title="Smazat"
-            >
-              <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-            </button>
-          </div>
-        </div>
-
-        {showInlineEditor ? (
-          <div className="nano-main-result-editor">
-            <div className="nano-main-result-editor-head">
-              <div className="nano-main-result-editor-title">
-                <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="#7ed957"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                <span>Upravit prompt</span>
-              </div>
-              <button
-                type="button"
-                className="nano-main-result-reference-toggle"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setShowReferenceUpload((prev) => ({ ...prev, [image.id]: !prev[image.id] }));
-                }}
-              >
-                <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-                <span>+ Obrazky</span>
-              </button>
-            </div>
-
-            <textarea
-              value={editPrompt}
-              onChange={(event) => {
-                const value = event.target.value;
-                setEditPrompts((prev) => ({ ...prev, [image.id]: value }));
-              }}
-              placeholder="Popiste upravy a stisknete Regenerovat obrazek..."
-              rows={4}
-              className="nano-main-result-editor-input"
-            />
-
-            {showReferenceUpload[image.id] ? (
-              <div className="nano-main-result-reference-strip">
-                <label className="nano-main-result-reference-upload">
-                  +
-                  <input type="file" multiple accept="image/*" className="hidden" />
-                </label>
-              </div>
-            ) : null}
-
-            <button
-              type="button"
-              className="nano-main-result-regenerate"
-              disabled={!editPrompt.trim() || props.isGenerating}
-              onClick={() => {
-                if (!image.versionId || !editPrompt.trim()) return;
-                props.onRegenerateVersion?.(image.versionId, editPrompt.trim());
-              }}
-            >
-              Regenerovat obrazek
-            </button>
-          </div>
-        ) : null}
-      </article>
-    );
-  };
+    return rows;
+  }, [
+    photoDirectorJobs,
+    props.generatingCount,
+    props.isGenerating,
+    props.snapshot.modelRuns,
+    props.snapshot.photoDirectorAspectRatio,
+    props.snapshot.photoDirectorInstruction,
+    props.snapshot.photoDirectorPolishMode,
+    props.snapshot.versions,
+    props.snapshot,
+  ]);
 
   return (
     <main className={props.activeRoute === 'mulen' ? 'main-canvas main-canvas--mulen' : 'main-canvas'}>
@@ -437,19 +409,36 @@ function MainCanvas(props: {
         <div className={props.activeRoute === 'mulen' ? 'nano-main-results' : 'image-stage nano-image-stage'}>
           {props.activeRoute === 'mulen' ? (
             <>
-              <header className="nano-main-results-heading">
-                <div className="nano-canvas-heading">
-                  <i />
-                  <span>Vysledky generovani</span>
-                </div>
-                {outputCards.length > 0 ? (
-                  <button className="nano-export-all-button" type="button" onClick={props.onCreateExport}>
-                    Exportovat vse
-                  </button>
-                ) : null}
-              </header>
-              <section className="nano-main-results-stage">
-                {outputCards.length === 0 ? (
+              <section className="nano-main-results-stage nano-main-results-stage--feed">
+                <header className="nano-creations-toolbar">
+                  <nav className="nano-creations-tabs" aria-label="Creations navigation">
+                    <button type="button" className="active">
+                      <Sparkles size={14} />
+                      <span>Creations</span>
+                    </button>
+                    <button type="button">
+                      <Grid2x2 size={14} />
+                      <span>My templates</span>
+                    </button>
+                    <button type="button">
+                      <BookOpen size={14} />
+                      <span>Academy</span>
+                    </button>
+                  </nav>
+                  <div className="nano-creations-toolbar-actions">
+                    <button type="button" className="active" aria-label="List view">
+                      <List size={16} />
+                    </button>
+                    <button type="button" aria-label="Grid view">
+                      <Grid2x2 size={16} />
+                    </button>
+                    <button type="button" aria-label="More options">
+                      <ChevronDown size={16} />
+                    </button>
+                  </div>
+                </header>
+                <div className="nano-creations-feed">
+                {creationRows.length === 0 ? (
                   <div className="nano-main-empty-state">
                     <div className="nano-empty-mark nano-empty-mark--animated" aria-hidden="true">
                       {emptyMarkDots.map((dot) => (
@@ -462,10 +451,54 @@ function MainCanvas(props: {
                     </div>
                   </div>
                 ) : (
-                  <div className="nano-main-result-grid">
-                    {outputCards.map((image) => renderNanoOutputCard(image))}
-                  </div>
+                  creationRows.map((row) => (
+                    <article className="nano-creation-row" key={row.id}>
+                      <header className="nano-creation-row-header">
+                        <p className="nano-creation-prompt" title={row.prompt}>
+                          {row.prompt}
+                        </p>
+                        <div className="nano-creation-meta">
+                          <span className="nano-creation-chip">{row.aspectRatio}</span>
+                          <span className="nano-creation-chip">{row.modelLabel}</span>
+                          <span className="nano-creation-chip">{row.speedLabel}</span>
+                          <span className="nano-creation-meta-divider" aria-hidden="true" />
+                          <Square size={14} />
+                          <span className="nano-creation-time">{formatRelativeTimeLabel(row.createdAt)}</span>
+                        </div>
+                      </header>
+                      <div className="nano-creation-strip">
+                        {row.cards.map((card) => (
+                          <button
+                            key={card.id}
+                            type="button"
+                            className={card.url ? 'nano-creation-card' : 'nano-creation-card is-loading'}
+                            onClick={() => {
+                              if (!card.versionId) return;
+                              props.onSelectVersion(card.versionId);
+                              setZoomedVersionId(card.versionId);
+                            }}
+                            disabled={!card.url}
+                          >
+                            {card.url ? (
+                              <img src={card.url} alt={card.label || row.prompt} />
+                            ) : (
+                              <div className="nano-creation-card-loading">
+                                <div className="nano-main-result-progress">
+                                  <div className="nano-main-result-progress-fill" />
+                                </div>
+                              </div>
+                            )}
+                            <span className="nano-creation-card-badge">
+                              <ImageIcon size={12} />
+                              <strong>{card.resolution}</strong>
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </article>
+                  ))
                 )}
+                </div>
               </section>
             </>
           ) : (
@@ -848,7 +881,16 @@ function NanoLeftSidebar(props: {
   onCloseSavePrompt: () => void;
   selectedSavedPromptId: string | null;
   canGenerate: boolean;
+  selectedModelId?: string;
+  onModelSelect?: (modelId: string) => void;
 }) {
+  const imageModelPresets = [
+    { id: 'auto', title: 'Auto', subtitle: 'Automatic selection' },
+    { id: 'gemini-flash', title: 'Nano 2', subtitle: 'Gemini 3.1 Flash' },
+    { id: 'gemini-pro', title: 'Nano Pro', subtitle: 'Gemini 3 Pro' },
+    { id: 'openai-image', title: 'GPT Img 2', subtitle: 'OpenAI' },
+    { id: 'flux-pro', title: 'Flux Pro', subtitle: 'fal.ai' },
+  ];
   const referenceAssets = props.snapshot.assets.filter((asset) => asset.kind === 'reference');
   const originalAsset = props.snapshot.assets.find((asset) => asset.id === props.snapshot.project.originalAssetId);
   const headswapSourceAsset = props.snapshot.assets.find((asset) => asset.id === props.snapshot.headswapSourceAssetId);
@@ -857,8 +899,12 @@ function NanoLeftSidebar(props: {
     props.snapshot.assets.find((asset) => asset.id === props.snapshot.styleSlotAssetId) ?? referenceAssets[0];
   const brandSlotAsset = props.snapshot.assets.find((asset) => asset.id === props.snapshot.brandSlotAssetId);
   const [dragSection, setDragSection] = useState<'input' | 'style' | 'brand' | null>(null);
+  const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
   const promptToolbarRef = useRef<HTMLDivElement | null>(null);
+  const modelMenuRef = useRef<HTMLDivElement | null>(null);
   const route = props.activeRoute;
+  const selectedModel =
+    imageModelPresets.find((preset) => preset.id === props.selectedModelId) ?? imageModelPresets[0];
 
   const handleFile = (fileList: FileList | File[], mode: 'input' | 'style' | 'brand' | 'source-face' | 'target-scene') => {
     const file = Array.from(fileList).find((item) => item.type.startsWith('image/'));
@@ -918,20 +964,87 @@ function NanoLeftSidebar(props: {
     return () => window.removeEventListener('pointerdown', handlePointerDown);
   }, [props.isSavedPromptsOpen, props.isSavePromptOpen, props.onToggleSavedPrompts, props.onCloseSavePrompt]);
 
+  useEffect(() => {
+    if (!isModelMenuOpen || typeof window === 'undefined') return;
+
+    const handlePointerDown = (event: MouseEvent | PointerEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (modelMenuRef.current?.contains(target)) return;
+      setIsModelMenuOpen(false);
+    };
+
+    window.addEventListener('pointerdown', handlePointerDown);
+    return () => window.removeEventListener('pointerdown', handlePointerDown);
+  }, [isModelMenuOpen]);
+
   return (
     <aside className="nano-left-panel">
       <section className="nano-action-panel">
         <button className={`nano-generate-button ${props.canGenerate ? 'ready' : ''}`} disabled={!props.canGenerate || props.isGenerating} onClick={props.onPrimaryAction} type="button">
           <span>{commandConfig.primaryLabel}</span>
-          <small>{props.isGenerating ? commandConfig.loadingLabel : commandConfig.primaryMeta}</small>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+            <path d="m12 3 1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3Z" />
+            <path d="M19 3v4" />
+            <path d="M21 5h-4" />
+            <path d="M5 17v2" />
+            <path d="M6 18H4" />
+          </svg>
         </button>
         <div className="nano-mini-actions">
           {commandConfig.quickActions.map((action) => (
             <button key={action.label} type="button" onClick={action.onClick}>
-              <strong>{action.label}</strong>
-              <small>{action.meta}</small>
+              <span>{action.label}</span>
             </button>
           ))}
+        </div>
+        <div className="nano-model-select-block" ref={modelMenuRef}>
+          <p>Model</p>
+          <button
+            type="button"
+            className={`nano-model-select-trigger ${isModelMenuOpen ? 'open' : ''}`}
+            onClick={() => setIsModelMenuOpen((current) => !current)}
+            aria-haspopup="listbox"
+            aria-expanded={isModelMenuOpen}
+          >
+            <span className="nano-model-select-leading" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                <path d="m12 2 2.2 5.8L20 10l-5.8 2.2L12 18l-2.2-5.8L4 10l5.8-2.2L12 2Z" />
+                <path d="M6 14.5 7.1 17 9.5 18.1 7.1 19.2 6 21.5 4.9 19.2 2.5 18.1 4.9 17 6 14.5Z" />
+              </svg>
+            </span>
+            <span className="nano-model-select-copy">
+              <strong>{selectedModel.title}</strong>
+            </span>
+            <span className="nano-model-select-chevron" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="m6 9 6 6 6-6" />
+              </svg>
+            </span>
+          </button>
+          {isModelMenuOpen ? (
+            <div className="nano-model-select-menu" role="listbox" aria-label="Model selection">
+              {imageModelPresets.map((preset) => {
+                const isActive = preset.id === selectedModel.id;
+                return (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    className={isActive ? 'nano-model-select-option active' : 'nano-model-select-option'}
+                    onClick={() => {
+                      props.onModelSelect?.(preset.id);
+                      setIsModelMenuOpen(false);
+                    }}
+                    role="option"
+                    aria-selected={isActive}
+                  >
+                    <strong>{preset.title}</strong>
+                    <span>{preset.subtitle}</span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
         </div>
         <div className="nano-count-picker">
           <p>{commandConfig.optionRowLabel}</p>
@@ -949,94 +1062,99 @@ function NanoLeftSidebar(props: {
           </div>
         </div>
         <div className="nano-prompt-card">
-          <div className="nano-prompt-header">
-            <strong>{commandConfig.cardTitle}</strong>
-          </div>
-          {renderRouteCommandBody({
-            route,
-            snapshot: props.snapshot,
-            onInstructionChange: props.onInstructionChange,
-            onLockedTextChange: props.onLockedTextChange,
-            onUpscalerScaleChange: props.onUpscalerScaleChange,
-            onUpscalerFocusChange: props.onUpscalerFocusChange,
-            onVariantCountChange: props.onVariantCountChange,
-            onVariantIntensityChange: props.onVariantIntensityChange,
-            onMultiAngleSetTypeChange: props.onMultiAngleSetTypeChange,
-            onMultiAngleShotCountChange: props.onMultiAngleShotCountChange,
-            onMultiAnglePrecisionChange: props.onMultiAnglePrecisionChange,
-            onHeadswapHairModeChange: props.onHeadswapHairModeChange,
-            onModelInfluencePromptChange: props.onModelInfluencePromptChange,
-            onModelInfluenceStrengthChange: props.onModelInfluenceStrengthChange,
-            onStyleTransferPromptChange: props.onStyleTransferPromptChange,
-            onStyleTransferPreserveCompositionChange: props.onStyleTransferPreserveCompositionChange,
-            onVisualGuidePromptChange: props.onVisualGuidePromptChange,
-            onVisualGuideStepCountChange: props.onVisualGuideStepCountChange,
-            onVisualGuideStyleChange: props.onVisualGuideStyleChange,
-            onInfographicTopicChange: props.onInfographicTopicChange,
-            onInfographicFormatChange: props.onInfographicFormatChange,
-            onInfographicThemeChange: props.onInfographicThemeChange,
-            promptMode: props.promptMode,
-          })}
           {route === 'mulen' ? (
             <>
-              <div className="nano-prompt-mode-tabs inline">
+              <div className="nano-prompt-label">
+                <strong>PROMPT</strong>
+              </div>
+              <div className="nano-prompt-surface">
+                <textarea
+                  value={props.snapshot.photoDirectorInstruction}
+                  onChange={(event) => props.onInstructionChange(event.target.value)}
+                  placeholder="Describe your image-try @ to add references"
+                  className="nano-prompt-surface-textarea"
+                />
                 <button
                   type="button"
-                  className={props.promptMode === 'simple' ? 'nano-prompt-mode-tab active' : 'nano-prompt-mode-tab'}
-                  onClick={() => props.onPromptModeChange?.('simple')}
+                  className="nano-ai-prompt-button"
+                  disabled={!props.canEnhancePrompt || props.isEnhancingPrompt}
+                  onClick={props.onEnhancePrompt}
                 >
-                  Simple
-                </button>
-                <button
-                  type="button"
-                  className={props.promptMode === 'advanced' ? 'nano-prompt-mode-tab active' : 'nano-prompt-mode-tab'}
-                  onClick={() => props.onPromptModeChange?.('advanced')}
-                >
-                  Interpretace
+                  <span className="nano-ai-prompt-switch" aria-hidden="true">
+                    <i />
+                  </span>
+                  <span>{props.isEnhancingPrompt ? 'AI prompt...' : 'AI prompt'}</span>
                 </button>
               </div>
-              {props.promptMode === 'simple' ? (
-                <p className="nano-prompt-helper">
-                  Volitelné: doplňující prompt. Styl, Merge a Object fungují i bez textu.
-                </p>
-              ) : (
-                <div className="nano-prompt-mode-advanced">
-                  <div className="nano-prompt-mode-grid advanced">
-                    {[
-                      { id: 'A', label: 'VARIANTA A', summary: 'Autenticita', description: 'Maximální autenticita a věrohodnost. Drží realitu a přirozené nedokonalosti.' },
-                      { id: 'B', label: 'VARIANTA B', summary: 'Vylepšení', description: 'Silnější estetické vylepšení. Čistší, vybroušenější a více premium výsledek.' },
-                      { id: 'C', label: 'VARIANTA C', summary: 'Vyvážené', description: 'Vyrovnaný kompromis mezi realitou a estetikou. Bezpečná výchozí volba.' },
-                    ].map((option) => (
+            </>
+          ) : (
+            <>
+              <div className="nano-prompt-header">
+                <strong>{commandConfig.cardTitle}</strong>
+              </div>
+              {renderRouteCommandBody({
+                route,
+                snapshot: props.snapshot,
+                onInstructionChange: props.onInstructionChange,
+                onLockedTextChange: props.onLockedTextChange,
+                onUpscalerScaleChange: props.onUpscalerScaleChange,
+                onUpscalerFocusChange: props.onUpscalerFocusChange,
+                onVariantCountChange: props.onVariantCountChange,
+                onVariantIntensityChange: props.onVariantIntensityChange,
+                onMultiAngleSetTypeChange: props.onMultiAngleSetTypeChange,
+                onMultiAngleShotCountChange: props.onMultiAngleShotCountChange,
+                onMultiAnglePrecisionChange: props.onMultiAnglePrecisionChange,
+                onHeadswapHairModeChange: props.onHeadswapHairModeChange,
+                onModelInfluencePromptChange: props.onModelInfluencePromptChange,
+                onModelInfluenceStrengthChange: props.onModelInfluenceStrengthChange,
+                onStyleTransferPromptChange: props.onStyleTransferPromptChange,
+                onStyleTransferPreserveCompositionChange: props.onStyleTransferPreserveCompositionChange,
+                onVisualGuidePromptChange: props.onVisualGuidePromptChange,
+                onVisualGuideStepCountChange: props.onVisualGuideStepCountChange,
+                onVisualGuideStyleChange: props.onVisualGuideStyleChange,
+                onInfographicTopicChange: props.onInfographicTopicChange,
+                onInfographicFormatChange: props.onInfographicFormatChange,
+                onInfographicThemeChange: props.onInfographicThemeChange,
+                promptMode: props.promptMode,
+              })}
+            </>
+          )}
+          {route === 'mulen' ? (
+            <>
+              <div className="nano-reference-block">
+                <strong>REFERENCES</strong>
+                <div className="nano-reference-grid">
+                  {[
+                    { id: 'A', label: 'Authentic', icon: Sparkles },
+                    { id: 'B', label: 'Enhance', icon: BadgePlus },
+                    { id: 'C', label: 'Balance', icon: Flower2 },
+                  ].map((option) => {
+                    const Icon = option.icon;
+                    return (
                       <button
                         key={option.id}
                         type="button"
-                        className={props.advancedVariant === option.id ? 'nano-prompt-mode-option active' : 'nano-prompt-mode-option'}
+                        className={props.advancedVariant === option.id ? 'nano-reference-card active' : 'nano-reference-card'}
                         onClick={() => props.onAdvancedVariantChange?.(option.id as 'A' | 'B' | 'C')}
                       >
-                        <strong>{option.label}</strong>
-                        <b>{option.summary}</b>
-                        <p>{option.description}</p>
+                        <Icon size={14} strokeWidth={2} />
+                        <span>{option.label}</span>
                       </button>
-                    ))}
-                  </div>
+                    );
+                  })}
                   <button
                     type="button"
-                    className={props.faceIdentityMode ? 'nano-face-identity-card active' : 'nano-face-identity-card'}
+                    className={props.faceIdentityMode ? 'nano-reference-card active' : 'nano-reference-card'}
                     onClick={() => props.onFaceIdentityModeChange?.(!props.faceIdentityMode)}
                   >
-                    <span className="nano-face-toggle" aria-hidden="true">
-                      <i />
-                    </span>
-                    <span>
-                      <strong>Zachování identity tváře</strong>
-                      <p>Upřednostnit věrnost tváře před estetikou</p>
-                    </span>
+                    <UserRound size={14} strokeWidth={2} />
+                    <span>Face ID</span>
                   </button>
                 </div>
-              )}
+              </div>
             </>
           ) : null}
-          {isPromptEnhanceableRoute(route) ? (
+          {isPromptEnhanceableRoute(route) && route !== 'mulen' ? (
             <div className="nano-prompt-enhancer" ref={promptToolbarRef}>
               <button
                 type="button"
@@ -1215,7 +1333,10 @@ function UploadSection(props: {
           if (event.dataTransfer.files) props.onDropFiles(event.dataTransfer.files);
         }}
       >
-        <span>+</span>
+        <span className="nano-upload-box-empty" aria-hidden="true">
+          <ImageUp size={13} strokeWidth={2} />
+          <em>Select image</em>
+        </span>
       </button>
       {props.helper ? <p>{props.helper}</p> : null}
     </section>
@@ -1245,14 +1366,14 @@ function getRouteCommandConfig(
   switch (route) {
     case 'mulen':
       return {
-        primaryLabel: 'Generovat',
+        primaryLabel: 'Generate',
         primaryMeta: `${snapshot.photoDirectorOutputCount} vystupu`,
         loadingLabel: 'Generuji...',
         quickActions: [
-          { label: '3 varianty', meta: 'promptu', onClick: () => actions.onOutputCountChange(3) },
-          { label: 'Vsechny', meta: 'modely', onClick: () => actions.onOutputCountChange(5) },
+          { label: 'gen/all models', meta: '', onClick: () => actions.onOutputCountChange(5) },
+          { label: 'var/prompts', meta: '', onClick: () => actions.onOutputCountChange(3) },
         ],
-        optionRowLabel: 'Pocet obrazku',
+        optionRowLabel: 'Image count',
         optionRow: [1, 2, 3, 4, 5].map((value) => ({
           label: String(value),
           active: snapshot.photoDirectorOutputCount === value,
@@ -1461,16 +1582,16 @@ function getRouteUploadConfigs(input: {
           id: 'nano-input-upload',
           dragKey: 'input' as const,
           mode: 'input' as const,
-          title: 'Vstupni obrazky',
+          title: 'imput images',
           count: input.originalAsset ? 1 : 0,
-          helper: input.originalAsset ? input.originalAsset.storagePath : 'Nahraj hlavni source fotku',
+          helper: input.originalAsset ? undefined : 'Nahraj hlavni source fotku',
           asset: input.originalAsset,
         },
         {
           id: 'nano-style-upload',
           dragKey: 'style' as const,
           mode: 'style' as const,
-          title: 'Stylove obrazky',
+          title: 'reference images',
           count: input.referenceAssets.length,
           helper: input.styleSlotAsset?.storagePath ?? baseStyleHelper,
           asset: input.styleSlotAsset,
@@ -1479,7 +1600,7 @@ function getRouteUploadConfigs(input: {
           id: 'nano-brand-upload',
           dragKey: 'brand' as const,
           mode: 'brand' as const,
-          title: 'Proprietarni prvky',
+          title: 'proprietal images',
           count: input.brandSlotAsset ? 1 : input.lockedCount,
           helper: input.brandSlotAsset?.storagePath ?? 'Logo / klobouk / boty / produkt. Neovlivnuje styl, pouze obsahove doplneni vystupu.',
           asset: input.brandSlotAsset,
@@ -1750,13 +1871,6 @@ function NanoRightSidebar(props: {
   selectedModelId?: string;
   onModelSelect?: (modelId: string) => void;
 }) {
-  const imageModelPresets = [
-    { id: 'gemini-flash', title: 'Nano 2', subtitle: 'Gemini 3.1 Flash' },
-    { id: 'gemini-pro', title: 'Nano Pro', subtitle: 'Gemini 3 Pro' },
-    { id: 'openai-image', title: 'GPT Img 2', subtitle: 'OpenAI' },
-    { id: 'flux-pro', title: 'Flux Pro', subtitle: 'fal.ai' },
-  ];
-
   const simpleOptions = [
     { id: 'style' as const, label: 'STYL', summary: 'kompozice', description: 'Prenese kompozici, nasviceni a barvy ze stylu. Obsah i identita zustanou ze vstupu.' },
     { id: 'merge' as const, label: 'MERGE', summary: 'spojeni', description: 'Volne spoji vstup a referenci do jednoho vysledku. Meni obsah i formu najednou.' },
@@ -1769,25 +1883,6 @@ function NanoRightSidebar(props: {
   ];
   return (
     <aside className="nano-right-panel">
-      {/* Model selection grid */}
-      <div className="nano-model-grid">
-        {imageModelPresets.map((preset) => {
-          const isActive = props.selectedModelId === preset.id;
-          return (
-            <button
-              key={preset.id}
-              type="button"
-              className={isActive ? 'nano-model-option active' : 'nano-model-option'}
-              onClick={() => props.onModelSelect?.(preset.id)}
-              title={`${preset.title} — ${preset.subtitle}`}
-            >
-              <div className="nano-model-title">{preset.title}</div>
-              <div className="nano-model-subtitle">{preset.subtitle}</div>
-            </button>
-          );
-        })}
-      </div>
-
       {props.activeRoute === 'mulen' ? (
         <div className="nano-route-panel">
           <section className="nano-prompt-mode-block">
@@ -1851,7 +1946,7 @@ export function ProjectWorkspace(props: {
   const canGenerate = useMemo(() => {
     switch (props.activeRoute) {
       case 'mulen':
-        return workspace.photoDirectorInstruction.trim() !== '' || snapshot.assets.some((a: Asset) => a.kind === 'reference') || !!workspace.project.originalAssetId;
+        return workspace.photoDirectorInstruction.trim() !== '';
       case 'ai-upscaler':
         return !!workspace.project.originalAssetId;
       case 'face-swap':
@@ -4378,6 +4473,8 @@ export function ProjectWorkspace(props: {
           onSavedPromptDraftNameChange={setSavedPromptDraftName}
           onCloseSavePrompt={() => setIsSavePromptOpen(false)}
           selectedSavedPromptId={selectedSavedPromptId}
+          selectedModelId={selectedModelId}
+          onModelSelect={setSelectedModelId}
         />
         <MainCanvas
           activeRoute={props.activeRoute}
@@ -4388,33 +4485,24 @@ export function ProjectWorkspace(props: {
           generatingCount={workspace.photoDirectorOutputCount}
           onRegenerateVersion={handleRegenerateFromCanvas}
         />
-        <NanoRightSidebar
-          activeRoute={props.activeRoute}
-          promptMode={promptMode}
-          onPromptModeChange={setPromptMode}
-          simpleLinkMode={simpleLinkMode}
-          onSimpleLinkModeChange={(value) => setSimpleLinkMode((current) => (current === value ? null : value))}
-          advancedVariant={advancedVariant}
-          onAdvancedVariantChange={setAdvancedVariant}
-          faceIdentityMode={faceIdentityMode}
-          onFaceIdentityModeChange={setFaceIdentityMode}
-          selectedModelId={selectedModelId}
-          onModelSelect={setSelectedModelId}
-        />
       </div>
-      <div className="memory-bottom-bar">
-        <div className="workspace-note">{workspaceNote}</div>
-        <TimelinePanel
-          snapshot={workspace}
-          onSelectVersion={setActiveVersion}
-          onResetToActive={handleResetToActive}
-          onContinueFromActive={handleContinueFromActive}
-        />
-      </div>
-      <div className="edge-label">
-        <PanelRight size={16} />
-        <span>{activeMemoryVersion?.label ?? getNanoRouteLabel(props.activeRoute)}</span>
-      </div>
+      {props.activeRoute !== 'mulen' ? (
+        <>
+          <div className="memory-bottom-bar">
+            <div className="workspace-note">{workspaceNote}</div>
+            <TimelinePanel
+              snapshot={workspace}
+              onSelectVersion={setActiveVersion}
+              onResetToActive={handleResetToActive}
+              onContinueFromActive={handleContinueFromActive}
+            />
+          </div>
+          <div className="edge-label">
+            <PanelRight size={16} />
+            <span>{activeMemoryVersion?.label ?? getNanoRouteLabel(props.activeRoute)}</span>
+          </div>
+        </>
+      ) : null}
     </div>
   );
 }
