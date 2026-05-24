@@ -832,7 +832,10 @@ button.primary:hover {
 .nano-mini-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px;
+  gap: 0;
+  background: transparent;
+  border-radius: 8px;
+  padding: 2px;
 }
 
 .nano-mini-actions button,
@@ -840,9 +843,9 @@ button.primary:hover {
 .nano-chip-grid button {
   min-height: 32px;
   border-radius: 8px;
-  background: #f8f8f6;
-  border-color: rgba(47, 58, 52, 0.1);
-  color: #333934;
+  background: transparent;
+  border-color: transparent;
+  color: #1a1a1a;
   font-size: 12px;
   line-height: 1.15;
 }
