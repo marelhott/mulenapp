@@ -3819,7 +3819,7 @@ button.primary:hover {
   border: none;
   background: transparent;
   color: #4c5663;
-  font-size: 16px;
+  font-size: 12px;
   font-weight: 400;
   cursor: pointer;
   transition: all 120ms ease;
