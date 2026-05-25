@@ -1,5 +1,5 @@
 import { startTransition, useEffect, useRef, useState, useMemo } from 'react';
-import { BadgePlus, BookOpen, ChevronDown, Flower2, Grid2x2, ImageIcon, ImageUp, List, PanelRight, Sparkles, Square, UserRound } from 'lucide-react';
+import { BadgePlus, BookOpen, ChevronDown, Flower2, Grid2x2, ImageIcon, ImageUp, List, PanelRight, Sparkles, Square, UserRound, X } from 'lucide-react';
 import type {
   Asset,
   EditStep,
@@ -180,6 +180,8 @@ function MainCanvas(props: {
   isGenerating: boolean;
   generatingCount?: number;
   onRegenerateVersion?: (versionId: string, prompt: string) => void;
+  onDeleteVersion?: (versionId: string) => void;
+  onDeleteRow?: (jobId: string) => void;
 }) {
   const [zoomedVersionId, setZoomedVersionId] = useState<string | null>(null);
   // Session-local generated images (cleared on refresh automatically because state is not persisted)
@@ -464,35 +466,56 @@ function MainCanvas(props: {
                           <span className="nano-creation-meta-divider" aria-hidden="true" />
                           <Square size={14} />
                           <span className="nano-creation-time">{formatRelativeTimeLabel(row.createdAt)}</span>
+                          {row.id !== 'pending-generation' && props.onDeleteRow ? (
+                            <button
+                              type="button"
+                              className="nano-creation-row-delete"
+                              aria-label="Smazat celý řádek"
+                              onClick={(e) => { e.stopPropagation(); props.onDeleteRow!(row.id); }}
+                            >
+                              <X size={12} />
+                            </button>
+                          ) : null}
                         </div>
                       </header>
                       <div className="nano-creation-strip">
                         {row.cards.map((card) => (
-                          <button
-                            key={card.id}
-                            type="button"
-                            className={card.url ? 'nano-creation-card' : 'nano-creation-card is-loading'}
-                            onClick={() => {
-                              if (!card.versionId) return;
-                              props.onSelectVersion(card.versionId);
-                              setZoomedVersionId(card.versionId);
-                            }}
-                            disabled={!card.url}
-                          >
-                            {card.url ? (
-                              <img src={card.url} alt={card.label || row.prompt} />
-                            ) : (
-                              <div className="nano-creation-card-loading">
-                                <div className="nano-main-result-progress">
-                                  <div className="nano-main-result-progress-fill" />
+                          <div key={card.id} className="nano-creation-card-wrap">
+                            <button
+                              type="button"
+                              className={card.url ? 'nano-creation-card' : 'nano-creation-card is-loading'}
+                              onClick={() => {
+                                if (!card.versionId) return;
+                                props.onSelectVersion(card.versionId);
+                                setZoomedVersionId(card.versionId);
+                              }}
+                              disabled={!card.url}
+                            >
+                              {card.url ? (
+                                <img src={card.url} alt={card.label || row.prompt} />
+                              ) : (
+                                <div className="nano-creation-card-loading">
+                                  <div className="nano-main-result-progress">
+                                    <div className="nano-main-result-progress-fill" />
+                                  </div>
                                 </div>
-                              </div>
-                            )}
-                            <span className="nano-creation-card-badge">
-                              <ImageIcon size={12} />
-                              <strong>{card.resolution}</strong>
-                            </span>
-                          </button>
+                              )}
+                              <span className="nano-creation-card-badge">
+                                <ImageIcon size={12} />
+                                <strong>{card.resolution}</strong>
+                              </span>
+                            </button>
+                            {card.versionId && props.onDeleteVersion ? (
+                              <button
+                                type="button"
+                                className="nano-creation-card-delete"
+                                aria-label="Smazat obrázek"
+                                onClick={(e) => { e.stopPropagation(); props.onDeleteVersion!(card.versionId); }}
+                              >
+                                <X size={10} />
+                              </button>
+                            ) : null}
+                          </div>
                         ))}
                       </div>
                     </article>
@@ -883,6 +906,8 @@ function NanoLeftSidebar(props: {
   canGenerate: boolean;
   selectedModelId?: string;
   onModelSelect?: (modelId: string) => void;
+  aspectRatio?: 'original' | 'square' | 'portrait' | 'landscape';
+  onAspectRatioChange?: (value: 'original' | 'square' | 'portrait' | 'landscape') => void;
 }) {
   const imageModelPresets = [
     { id: 'auto', title: 'Auto', subtitle: 'Automatic selection' },
@@ -1061,6 +1086,27 @@ function NanoLeftSidebar(props: {
             ))}
           </div>
         </div>
+        {route === 'mulen' && props.onAspectRatioChange ? (
+          <div className="nano-ratio-picker">
+            <p>Ratio</p>
+            <div className="nano-ratio-row">
+              {(['original', 'square', 'portrait', 'landscape'] as const).map((ratio) => {
+                const labels: Record<string, string> = { original: 'Original', square: 'Square', portrait: 'Portrait', landscape: 'Landscape' };
+                const isActive = (props.aspectRatio ?? 'original') === ratio;
+                return (
+                  <button
+                    key={ratio}
+                    type="button"
+                    className={isActive ? 'active' : ''}
+                    onClick={() => props.onAspectRatioChange!(ratio)}
+                  >
+                    {labels[ratio]}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
         <div className="nano-prompt-card">
           {route === 'mulen' ? (
             <>
@@ -4383,6 +4429,54 @@ export function ProjectWorkspace(props: {
     }, 700);
   };
 
+  const handleDeleteVersion = (versionId: string) => {
+    startTransition(() => {
+      setWorkspace((current) => {
+        const version = current.versions.find((v) => v.id === versionId);
+        const assetId = version?.assetId;
+        const wasActive = current.project.activeVersionId === versionId;
+        const remainingVersions = current.versions.filter((v) => v.id !== versionId);
+        const newActiveVersionId = wasActive
+          ? (remainingVersions.find((v) => v.module === 'photo-director')?.id ?? remainingVersions[0]?.id ?? current.project.activeVersionId)
+          : current.project.activeVersionId;
+        return {
+          ...current,
+          versions: remainingVersions,
+          assets: assetId ? current.assets.filter((a) => a.id !== assetId) : current.assets,
+          project: { ...current.project, activeVersionId: newActiveVersionId },
+          jobs: current.jobs.map((job) => ({
+            ...job,
+            outputVersionIds: job.outputVersionIds.filter((id) => id !== versionId),
+          })),
+        };
+      });
+    });
+  };
+
+  const handleDeleteRow = (jobId: string) => {
+    startTransition(() => {
+      setWorkspace((current) => {
+        const job = current.jobs.find((j) => j.id === jobId);
+        if (!job) return current;
+        const versionIds = new Set(job.outputVersionIds);
+        const versionsToRemove = current.versions.filter((v) => versionIds.has(v.id));
+        const assetIdsToRemove = new Set(versionsToRemove.map((v) => v.assetId).filter(Boolean));
+        const wasActive = versionIds.has(current.project.activeVersionId);
+        const remainingVersions = current.versions.filter((v) => !versionIds.has(v.id));
+        const newActiveVersionId = wasActive
+          ? (remainingVersions.find((v) => v.module === 'photo-director')?.id ?? remainingVersions[0]?.id ?? current.project.activeVersionId)
+          : current.project.activeVersionId;
+        return {
+          ...current,
+          jobs: current.jobs.filter((j) => j.id !== jobId),
+          versions: remainingVersions,
+          assets: current.assets.filter((a) => !assetIdsToRemove.has(a.id)),
+          project: { ...current.project, activeVersionId: newActiveVersionId },
+        };
+      });
+    });
+  };
+
   const handleResetToActive = () => {
     const activeVersion = workspace.versions.find((version) => version.id === workspace.project.activeVersionId);
     setWorkspaceNote(`Pracovni smer je znovu ukotveny na verzi ${activeVersion?.label ?? 'aktivni verze'}.`);
@@ -4474,6 +4568,8 @@ export function ProjectWorkspace(props: {
           selectedSavedPromptId={selectedSavedPromptId}
           selectedModelId={selectedModelId}
           onModelSelect={setSelectedModelId}
+          aspectRatio={workspace.photoDirectorAspectRatio}
+          onAspectRatioChange={setAspectRatio}
         />
         <MainCanvas
           activeRoute={props.activeRoute}
@@ -4483,6 +4579,8 @@ export function ProjectWorkspace(props: {
           isGenerating={isGenerating}
           generatingCount={workspace.photoDirectorOutputCount}
           onRegenerateVersion={handleRegenerateFromCanvas}
+          onDeleteVersion={handleDeleteVersion}
+          onDeleteRow={handleDeleteRow}
         />
       </div>
       {props.activeRoute !== 'mulen' ? (

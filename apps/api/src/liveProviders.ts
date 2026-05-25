@@ -333,6 +333,24 @@ export async function enhancePromptText(prompt: string) {
   return enhancedPrompt;
 }
 
+function isMockAsset(asset: Asset | undefined): boolean {
+  if (!asset) return true;
+  const url = asset.url || '';
+  const path = asset.storagePath || '';
+  // Mock assets use unsplash URLs or have 'mock/' storage paths
+  return (
+    url.includes('unsplash.com') ||
+    url.includes('images.unsplash') ||
+    path.startsWith('mock/') ||
+    path.includes('/mock/')
+  );
+}
+
+function composeTextToImagePrompt(instruction: string, index: number, outputCount: number): string {
+  const variationHint = outputCount > 1 ? ` Create variation ${index + 1} with a slightly different composition or angle.` : '';
+  return `${instruction}. High quality, professional photography, photorealistic, 8K resolution.${variationHint}`;
+}
+
 export async function runLivePhotoDirectorJob(snapshot: WorkspaceSnapshot, job: GenerationJob): Promise<WorkspaceSnapshot> {
   const apiKey = getGeminiApiKey();
   if (!apiKey) {
@@ -349,7 +367,12 @@ export async function runLivePhotoDirectorJob(snapshot: WorkspaceSnapshot, job: 
   const referenceAssets = collectReferenceAssets(snapshot);
   const createdAt = new Date().toISOString();
 
-  if (!sourceAsset?.url?.startsWith('data:') && !sourceAsset?.url?.startsWith('https://')) {
+  // Detect if user has a real uploaded image or only mock placeholder
+  const hasMockSource = isMockAsset(sourceAsset);
+  const hasRealReferenceImages = referenceAssets.some((a) => !isMockAsset(a));
+
+  // Only require valid URL when we actually need to use the source image
+  if (!hasMockSource && !sourceAsset?.url?.startsWith('data:') && !sourceAsset?.url?.startsWith('https://')) {
     throw new Error('Source asset is missing a usable image URL or data URL.');
   }
 
@@ -362,22 +385,46 @@ export async function runLivePhotoDirectorJob(snapshot: WorkspaceSnapshot, job: 
 
   for (let index = 0; index < outputCount; index += 1) {
     const parts: Array<Record<string, unknown>> = [];
-    const sourceDataUrl = await assetUrlToDataUrl(sourceAsset.url, sourceAsset.mimeType);
-    parts.push(dataUrlToInlinePart(sourceDataUrl));
 
+    // Only include source image if it's a real user-uploaded image (not mock placeholder)
+    if (!hasMockSource) {
+      const sourceDataUrl = await assetUrlToDataUrl(sourceAsset.url, sourceAsset.mimeType);
+      parts.push(dataUrlToInlinePart(sourceDataUrl));
+    }
+
+    // Include real reference images (not mock ones)
     for (const referenceAsset of referenceAssets) {
+      if (isMockAsset(referenceAsset)) continue;
       const referenceDataUrl = await assetUrlToDataUrl(referenceAsset.url, referenceAsset.mimeType);
       parts.push(dataUrlToInlinePart(referenceDataUrl));
     }
 
-    const prompt = composePhotoDirectorPrompt(input, snapshot, index);
+    // Choose prompt strategy: if no real images, use clean text-to-image prompt; otherwise use photo-director editing prompt
+    const instruction = String(input.instruction || '').trim();
+    const useTextToImage = hasMockSource && !hasRealReferenceImages;
+    const prompt = useTextToImage
+      ? composeTextToImagePrompt(instruction || 'a beautiful professional product photograph', index, outputCount)
+      : composePhotoDirectorPrompt(input, snapshot, index);
     parts.push({ text: prompt });
+
+    // Map aspect ratio to Gemini imageConfig format
+    const aspectRatioMap: Record<string, string> = {
+      square: '1:1',
+      portrait: '3:4',
+      landscape: '4:3',
+      original: '1:1',
+    };
+    const aspectRatioKey = String(input.aspectRatio || 'square');
+    const geminiAspectRatio = aspectRatioMap[aspectRatioKey] || '1:1';
 
     const response = await callGeminiImage(
       {
         contents: [{ parts }],
         generationConfig: {
           responseModalities: ['IMAGE'],
+          imageConfig: {
+            aspectRatio: geminiAspectRatio,
+          },
         },
         safetySettings: [
           { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_ONLY_HIGH' },
