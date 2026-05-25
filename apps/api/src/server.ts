@@ -336,6 +336,63 @@ app.get('/jobs/:jobId', async (request, reply) => {
   };
 });
 
+app.delete('/jobs/:jobId', async (request, reply) => {
+  const params = request.params as { jobId: string };
+  await updateStore((current) => {
+    const snapshot = current.snapshot;
+    const job = snapshot.jobs.find((j) => j.id === params.jobId);
+    if (!job) return current;
+    const versionIds = new Set(job.outputVersionIds);
+    const versionsToRemove = snapshot.versions.filter((v) => versionIds.has(v.id));
+    const assetIdsToRemove = new Set(versionsToRemove.map((v) => v.assetId).filter(Boolean));
+    const remainingVersions = snapshot.versions.filter((v) => !versionIds.has(v.id));
+    const wasActive = snapshot.project.activeVersionId ? versionIds.has(snapshot.project.activeVersionId) : false;
+    const newActiveVersionId = wasActive
+      ? (remainingVersions.find((v) => v.module === 'photo-director')?.id ?? remainingVersions[0]?.id ?? snapshot.project.activeVersionId)
+      : snapshot.project.activeVersionId;
+    return {
+      ...current,
+      snapshot: {
+        ...snapshot,
+        jobs: snapshot.jobs.filter((j) => j.id !== params.jobId),
+        versions: remainingVersions,
+        assets: snapshot.assets.filter((a) => !assetIdsToRemove.has(a.id)),
+        project: { ...snapshot.project, activeVersionId: newActiveVersionId },
+      },
+    };
+  });
+  return reply.code(204).send();
+});
+
+app.delete('/versions/:versionId', async (request, reply) => {
+  const params = request.params as { versionId: string };
+  await updateStore((current) => {
+    const snapshot = current.snapshot;
+    const version = snapshot.versions.find((v) => v.id === params.versionId);
+    if (!version) return current;
+    const assetId = version.assetId;
+    const remainingVersions = snapshot.versions.filter((v) => v.id !== params.versionId);
+    const wasActive = snapshot.project.activeVersionId === params.versionId;
+    const newActiveVersionId = wasActive
+      ? (remainingVersions.find((v) => v.module === 'photo-director')?.id ?? remainingVersions[0]?.id ?? snapshot.project.activeVersionId)
+      : snapshot.project.activeVersionId;
+    return {
+      ...current,
+      snapshot: {
+        ...snapshot,
+        versions: remainingVersions,
+        assets: assetId ? snapshot.assets.filter((a) => a.id !== assetId) : snapshot.assets,
+        jobs: snapshot.jobs.map((job) => ({
+          ...job,
+          outputVersionIds: job.outputVersionIds.filter((id) => id !== params.versionId),
+        })),
+        project: { ...snapshot.project, activeVersionId: newActiveVersionId },
+      },
+    };
+  });
+  return reply.code(204).send();
+});
+
 app.post<{ Body: CreateExportBody }>('/exports', async (request, reply) => {
   const body = request.body ?? {};
   const projectId = ensureProjectId(body.projectId);

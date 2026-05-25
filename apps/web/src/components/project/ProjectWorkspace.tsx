@@ -4721,6 +4721,7 @@ export function ProjectWorkspace(props: {
   };
 
   const handleDeleteVersion = (versionId: string) => {
+    // Optimistic local update
     startTransition(() => {
       setWorkspace((current) => {
         const version = current.versions.find((v) => v.id === versionId);
@@ -4742,9 +4743,12 @@ export function ProjectWorkspace(props: {
         };
       });
     });
+    // Persist to backend
+    void api.deleteVersion(versionId);
   };
 
   const handleDeleteRow = (jobId: string) => {
+    // Optimistic local update
     startTransition(() => {
       setWorkspace((current) => {
         const job = current.jobs.find((j) => j.id === jobId);
@@ -4766,6 +4770,8 @@ export function ProjectWorkspace(props: {
         };
       });
     });
+    // Persist to backend
+    void api.deleteJob(jobId);
   };
 
   const handleResetToActive = () => {

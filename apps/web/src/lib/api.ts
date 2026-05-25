@@ -104,6 +104,12 @@ export const api = {
       body: JSON.stringify(input),
     });
   },
+  deleteJob(jobId: string) {
+    return fetch(`${API_BASE_URL}/jobs/${jobId}`, { method: 'DELETE' });
+  },
+  deleteVersion(versionId: string) {
+    return fetch(`${API_BASE_URL}/versions/${versionId}`, { method: 'DELETE' });
+  },
 };
 
 export const setModel = async (modelId: string): Promise<void> => {
