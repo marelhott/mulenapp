@@ -4609,3 +4609,154 @@ select,
 .nano-creation-card-delete:hover {
   background: rgba(180, 30, 30, 0.85);
 }
+
+/* ── Upscaler Controls ─────────────────────────────────────────── */
+.nano-upscaler-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 2px;
+}
+
+.nano-upscaler-mode-selector {
+  width: 100%;
+}
+
+.nano-upscaler-mode-track {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  background: rgba(16, 16, 16, 0.06);
+  border-radius: 8px;
+  padding: 2px;
+  overflow: hidden;
+}
+
+.nano-upscaler-mode-indicator {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: calc(50% - 2px);
+  height: calc(100% - 4px);
+  background: #ffffff;
+  border-radius: 6px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  transition: transform 0.18s ease;
+  pointer-events: none;
+}
+
+.app-shell-dark .nano-upscaler-mode-indicator {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.nano-upscaler-mode-track button {
+  position: relative;
+  z-index: 1;
+  border: 0;
+  background: transparent;
+  border-radius: 6px;
+  padding: 5px 0;
+  font-size: 11px;
+  font-weight: 500;
+  color: rgba(16, 16, 16, 0.45);
+  cursor: pointer;
+  transition: color 0.15s;
+  text-align: center;
+}
+
+.nano-upscaler-mode-track button.active {
+  color: rgba(16, 16, 16, 0.85);
+}
+
+.app-shell-dark .nano-upscaler-mode-track button {
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.app-shell-dark .nano-upscaler-mode-track button.active {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.nano-upscaler-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.nano-upscaler-row > p {
+  font-size: 11px;
+  font-weight: 500;
+  color: rgba(16, 16, 16, 0.55);
+  margin: 0;
+}
+
+.app-shell-dark .nano-upscaler-row > p {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.nano-upscaler-slider-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.nano-upscaler-slider-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.nano-upscaler-slider-header > span:first-child {
+  font-size: 11px;
+  font-weight: 500;
+  color: rgba(16, 16, 16, 0.55);
+}
+
+.app-shell-dark .nano-upscaler-slider-header > span:first-child {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.nano-upscaler-slider-value {
+  font-size: 10px;
+  font-weight: 500;
+  color: rgba(16, 16, 16, 0.4);
+  font-variant-numeric: tabular-nums;
+}
+
+.app-shell-dark .nano-upscaler-slider-value {
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.nano-upscaler-slider {
+  width: 100%;
+  height: 3px;
+  accent-color: rgba(16, 16, 16, 0.7);
+  cursor: pointer;
+}
+
+.app-shell-dark .nano-upscaler-slider {
+  accent-color: rgba(255, 255, 255, 0.7);
+}
+
+.nano-upscaler-slider-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9px;
+  color: rgba(16, 16, 16, 0.3);
+  font-weight: 400;
+}
+
+.app-shell-dark .nano-upscaler-slider-labels {
+  color: rgba(255, 255, 255, 0.25);
+}
+
+.nano-upscaler-precision-desc {
+  font-size: 11px;
+  color: rgba(16, 16, 16, 0.45);
+  line-height: 1.45;
+  margin: 0;
+}
+
+.app-shell-dark .nano-upscaler-precision-desc {
+  color: rgba(255, 255, 255, 0.35);
+}

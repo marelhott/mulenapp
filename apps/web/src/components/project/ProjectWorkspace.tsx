@@ -57,7 +57,9 @@ type WorkspaceState = {
   exportFormat: 'png' | 'jpg' | 'pdf' | 'html';
   exportUseCase: 'web' | 'social' | 'print' | 'archive';
   aiUpscalerScale: '2k' | '4k';
-  aiUpscalerFocus: 'full' | 'face' | 'product';
+  aiUpscalerMode: 'creative' | 'precision';
+  aiUpscalerCreativity: number;
+  aiUpscalerResemblance: number;
   modelInfluencePrompt: string;
   modelInfluenceStrength: 'low' | 'medium' | 'high';
   styleTransferPrompt: string;
@@ -122,7 +124,9 @@ function createWorkspaceState(snapshot: WorkspaceSnapshot): WorkspaceState {
     exportFormat: 'png',
     exportUseCase: 'web',
     aiUpscalerScale: '2k',
-    aiUpscalerFocus: 'full',
+    aiUpscalerMode: 'creative',
+    aiUpscalerCreativity: 0.35,
+    aiUpscalerResemblance: 0.6,
     modelInfluencePrompt: 'Vylepsi materialy, presnost svetla a pocit finalni reklamni kvality.',
     modelInfluenceStrength: 'medium',
     styleTransferPrompt: 'Premium editorial daylight s cistsim pozadim a jemnejsim stylingem.',
@@ -676,7 +680,7 @@ function getRouteStageSupplement(
           {
             title: 'Scale',
             value: snapshot.aiUpscalerScale.toUpperCase(),
-            subtitle: `Fokus ${snapshot.aiUpscalerFocus}`,
+            subtitle: snapshot.aiUpscalerMode === 'creative' ? 'Creative' : 'Precision',
           },
           {
             title: 'Reference',
@@ -744,10 +748,10 @@ function getRouteStageConfig(
       return {
         eyebrow: 'Aktivni upscale',
         title: activeVersion?.label ?? 'Upscale branch',
-        subtitle: `Scale ${snapshot.aiUpscalerScale.toUpperCase()} · focus ${snapshot.aiUpscalerFocus}`,
+        subtitle: `Scale ${snapshot.aiUpscalerScale.toUpperCase()} · ${snapshot.aiUpscalerMode}`,
         compareLabel: 'Detail / Full',
         exportLabel: 'Export',
-        badges: [snapshot.aiUpscalerScale.toUpperCase(), snapshot.aiUpscalerFocus === 'full' ? 'Cely obraz' : snapshot.aiUpscalerFocus],
+        badges: [snapshot.aiUpscalerScale.toUpperCase(), snapshot.aiUpscalerMode],
         footerTitle: 'Upscale preview',
         footerText: 'Tady sledujeme detail, kresbu hran a cistotu povrchu v nove upscale verzi.',
         emptyMessage: 'Vyber zdrojovy obrazek vlevo a spust upscaler. Mulen vytvori novou detailni verzi do historie projektu.',
@@ -864,7 +868,9 @@ function NanoLeftSidebar(props: {
   onMultiAnglePrecisionChange: (value: 'bezpecna' | 'kreativni') => void;
   onHeadswapHairModeChange: (value: 'source' | 'target' | 'auto') => void;
   onUpscalerScaleChange: (value: '2k' | '4k') => void;
-  onUpscalerFocusChange: (value: 'full' | 'face' | 'product') => void;
+  onUpscalerModeChange: (value: 'creative' | 'precision') => void;
+  onUpscalerCreativityChange: (value: number) => void;
+  onUpscalerResemblanceChange: (value: number) => void;
   onModelInfluencePromptChange: (value: string) => void;
   onModelInfluenceStrengthChange: (value: 'low' | 'medium' | 'high') => void;
   onStyleTransferPromptChange: (value: string) => void;
@@ -963,7 +969,7 @@ function NanoLeftSidebar(props: {
     onMultiAnglePrecisionChange: props.onMultiAnglePrecisionChange,
     onHeadswapHairModeChange: props.onHeadswapHairModeChange,
     onUpscalerScaleChange: props.onUpscalerScaleChange,
-    onUpscalerFocusChange: props.onUpscalerFocusChange,
+    onUpscalerModeChange: props.onUpscalerModeChange,
     onModelInfluenceStrengthChange: props.onModelInfluenceStrengthChange,
     onStyleTransferPreserveCompositionChange: props.onStyleTransferPreserveCompositionChange,
     onVisualGuideStepCountChange: props.onVisualGuideStepCountChange,
@@ -1144,7 +1150,9 @@ function NanoLeftSidebar(props: {
                 onInstructionChange: props.onInstructionChange,
                 onLockedTextChange: props.onLockedTextChange,
                 onUpscalerScaleChange: props.onUpscalerScaleChange,
-                onUpscalerFocusChange: props.onUpscalerFocusChange,
+                onUpscalerModeChange: props.onUpscalerModeChange,
+                onUpscalerCreativityChange: props.onUpscalerCreativityChange,
+                onUpscalerResemblanceChange: props.onUpscalerResemblanceChange,
                 onVariantCountChange: props.onVariantCountChange,
                 onVariantIntensityChange: props.onVariantIntensityChange,
                 onMultiAngleSetTypeChange: props.onMultiAngleSetTypeChange,
@@ -1399,7 +1407,7 @@ function getRouteCommandConfig(
     onMultiAnglePrecisionChange: (value: 'bezpecna' | 'kreativni') => void;
     onHeadswapHairModeChange: (value: 'source' | 'target' | 'auto') => void;
     onUpscalerScaleChange: (value: '2k' | '4k') => void;
-    onUpscalerFocusChange: (value: 'full' | 'face' | 'product') => void;
+    onUpscalerModeChange: (value: 'creative' | 'precision') => void;
     onModelInfluenceStrengthChange: (value: 'low' | 'medium' | 'high') => void;
     onStyleTransferPreserveCompositionChange: (value: boolean) => void;
     onVisualGuideStepCountChange: (value: number) => void;
@@ -1430,18 +1438,17 @@ function getRouteCommandConfig(
       };
     case 'ai-upscaler':
       return {
-        primaryLabel: 'Upscalovat',
-        primaryMeta: `${snapshot.aiUpscalerScale.toUpperCase()} detail`,
-        loadingLabel: 'Upskaluji...',
+        primaryLabel: 'Upscale',
+        primaryMeta: `${snapshot.aiUpscalerScale.toUpperCase()} · ${snapshot.aiUpscalerMode}`,
+        loadingLabel: 'Upscaluji...',
         quickActions: [
           { label: '2K', meta: 'rychle', onClick: () => actions.onUpscalerScaleChange('2k') },
           { label: '4K', meta: 'detail', onClick: () => actions.onUpscalerScaleChange('4k') },
         ],
-        optionRowLabel: 'Fokus',
+        optionRowLabel: 'Scale',
         optionRow: [
-          { label: 'Full', active: snapshot.aiUpscalerFocus === 'full', onClick: () => actions.onUpscalerFocusChange('full') },
-          { label: 'Face', active: snapshot.aiUpscalerFocus === 'face', onClick: () => actions.onUpscalerFocusChange('face') },
-          { label: 'Prod', active: snapshot.aiUpscalerFocus === 'product', onClick: () => actions.onUpscalerFocusChange('product') },
+          { label: '2K', active: snapshot.aiUpscalerScale === '2k', onClick: () => actions.onUpscalerScaleChange('2k') },
+          { label: '4K', active: snapshot.aiUpscalerScale === '4k', onClick: () => actions.onUpscalerScaleChange('4k') },
         ],
         cardTitle: 'Upscale nastaveni',
         primaryModeLabel: 'Resolution',
@@ -1660,7 +1667,9 @@ function renderRouteCommandBody(props: {
   onInstructionChange: (value: string) => void;
   onLockedTextChange: (value: string) => void;
   onUpscalerScaleChange: (value: '2k' | '4k') => void;
-  onUpscalerFocusChange: (value: 'full' | 'face' | 'product') => void;
+  onUpscalerModeChange: (value: 'creative' | 'precision') => void;
+  onUpscalerCreativityChange: (value: number) => void;
+  onUpscalerResemblanceChange: (value: number) => void;
   onVariantCountChange: (value: number) => void;
   onVariantIntensityChange: (value: 'jemne' | 'stredne' | 'odvazne') => void;
   onMultiAngleSetTypeChange: (value: 'produktova' | 'interier' | 'lifestyle' | 'social') => void;
@@ -1708,41 +1717,89 @@ function renderRouteCommandBody(props: {
       );
     case 'ai-upscaler':
       return (
-        <div className="nano-inline-fields">
-          <label>
-            Rozliseni
-            <div className="segmented-control two-up">
-              {(['2k', '4k'] as const).map((value) => (
+        <div className="nano-upscaler-controls">
+          {/* Creative / Precision — sliding tab selector per Magnific */}
+          <div className="nano-upscaler-mode-selector">
+            <div className="nano-upscaler-mode-track">
+              <div
+                className="nano-upscaler-mode-indicator"
+                style={{ transform: props.snapshot.aiUpscalerMode === 'precision' ? 'translateX(100%)' : 'translateX(0)' }}
+              />
+              {(['creative', 'precision'] as const).map((mode) => (
                 <button
-                  key={value}
+                  key={mode}
                   type="button"
-                  className={props.snapshot.aiUpscalerScale === value ? 'segment active' : 'segment'}
-                  onClick={() => props.onUpscalerScaleChange(value)}
+                  className={props.snapshot.aiUpscalerMode === mode ? 'active' : ''}
+                  onClick={() => props.onUpscalerModeChange(mode)}
                 >
-                  {value.toUpperCase()}
+                  {mode === 'creative' ? 'Creative' : 'Precision'}
                 </button>
               ))}
             </div>
-          </label>
-          <label>
-            Fokus
-            <div className="segmented-control">
-              {([
-                ['full', 'Cely'],
-                ['face', 'Face'],
-                ['product', 'Produkt'],
-              ] as const).map(([value, label]) => (
+          </div>
+
+          {/* Scale — 2K / 4K */}
+          <div className="nano-upscaler-row">
+            <p>Scale</p>
+            <div className="nano-ratio-row">
+              {(['2k', '4k'] as const).map((scale) => (
                 <button
-                  key={value}
+                  key={scale}
                   type="button"
-                  className={props.snapshot.aiUpscalerFocus === value ? 'segment active' : 'segment'}
-                  onClick={() => props.onUpscalerFocusChange(value)}
+                  className={props.snapshot.aiUpscalerScale === scale ? 'active' : ''}
+                  onClick={() => props.onUpscalerScaleChange(scale)}
                 >
-                  {label}
+                  {scale.toUpperCase()}
                 </button>
               ))}
             </div>
-          </label>
+          </div>
+
+          {/* Creative mode sliders */}
+          {props.snapshot.aiUpscalerMode === 'creative' ? (
+            <>
+              <div className="nano-upscaler-slider-row">
+                <div className="nano-upscaler-slider-header">
+                  <span>Creativity</span>
+                  <span className="nano-upscaler-slider-value">{Math.round(props.snapshot.aiUpscalerCreativity * 100)}</span>
+                </div>
+                <input
+                  type="range"
+                  className="nano-upscaler-slider"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={props.snapshot.aiUpscalerCreativity}
+                  onChange={(e) => props.onUpscalerCreativityChange(Number(e.target.value))}
+                />
+                <div className="nano-upscaler-slider-labels">
+                  <span>Low</span>
+                  <span>High</span>
+                </div>
+              </div>
+              <div className="nano-upscaler-slider-row">
+                <div className="nano-upscaler-slider-header">
+                  <span>Resemblance</span>
+                  <span className="nano-upscaler-slider-value">{Math.round(props.snapshot.aiUpscalerResemblance * 100)}</span>
+                </div>
+                <input
+                  type="range"
+                  className="nano-upscaler-slider"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={props.snapshot.aiUpscalerResemblance}
+                  onChange={(e) => props.onUpscalerResemblanceChange(Number(e.target.value))}
+                />
+                <div className="nano-upscaler-slider-labels">
+                  <span>Faithful</span>
+                  <span>Creative</span>
+                </div>
+              </div>
+            </>
+          ) : (
+            <p className="nano-upscaler-precision-desc">Faithful upscale — preserves the original image exactly, adds only high-frequency detail.</p>
+          )}
         </div>
       );
     case 'face-swap':
@@ -2423,11 +2480,29 @@ export function ProjectWorkspace(props: {
     });
   };
 
-  const setUpscalerFocus = (value: 'full' | 'face' | 'product') => {
+  const setUpscalerMode = (value: 'creative' | 'precision') => {
     startTransition(() => {
       setWorkspace((current) => ({
         ...current,
-        aiUpscalerFocus: value,
+        aiUpscalerMode: value,
+      }));
+    });
+  };
+
+  const setUpscalerCreativity = (value: number) => {
+    startTransition(() => {
+      setWorkspace((current) => ({
+        ...current,
+        aiUpscalerCreativity: value,
+      }));
+    });
+  };
+
+  const setUpscalerResemblance = (value: number) => {
+    startTransition(() => {
+      setWorkspace((current) => ({
+        ...current,
+        aiUpscalerResemblance: value,
       }));
     });
   };
@@ -3176,7 +3251,9 @@ export function ProjectWorkspace(props: {
         jobInput: {
           workflow: 'ai-upscaler',
           scale: workspace.aiUpscalerScale,
-          focus: workspace.aiUpscalerFocus,
+          mode: workspace.aiUpscalerMode,
+          creativity: workspace.aiUpscalerCreativity,
+          resemblance: workspace.aiUpscalerResemblance,
           sourceVersionId: workspace.project.activeVersionId,
         },
         startMessage: `AI Upscaler odesila ${workspace.aiUpscalerScale.toUpperCase()} branch do backendu.`,
@@ -3216,7 +3293,9 @@ export function ProjectWorkspace(props: {
               workflow: 'ai-upscaler',
               workflowLabel: 'AI Upscaler',
               scale: current.aiUpscalerScale,
-              focus: current.aiUpscalerFocus,
+              mode: current.aiUpscalerMode,
+              creativity: current.aiUpscalerCreativity,
+              resemblance: current.aiUpscalerResemblance,
             },
           };
 
@@ -3226,7 +3305,7 @@ export function ProjectWorkspace(props: {
             parentVersionId: activeVersion?.id,
             assetId,
             label: `Upscale ${current.aiUpscalerScale.toUpperCase()}`,
-            prompt: `Upscale ${current.aiUpscalerScale} with focus ${current.aiUpscalerFocus}`,
+            prompt: `Upscale ${current.aiUpscalerScale} · ${current.aiUpscalerMode}`,
             module: 'photo-director',
             createdAt,
             modelRuns: [runId],
@@ -3235,7 +3314,9 @@ export function ProjectWorkspace(props: {
               workflow: 'ai-upscaler',
               workflowLabel: 'AI Upscaler',
               scale: current.aiUpscalerScale,
-              focus: current.aiUpscalerFocus,
+              mode: current.aiUpscalerMode,
+              creativity: current.aiUpscalerCreativity,
+              resemblance: current.aiUpscalerResemblance,
             },
           };
 
@@ -3276,7 +3357,9 @@ export function ProjectWorkspace(props: {
             input: {
               workflow: 'ai-upscaler',
               scale: current.aiUpscalerScale,
-              focus: current.aiUpscalerFocus,
+              mode: current.aiUpscalerMode,
+              creativity: current.aiUpscalerCreativity,
+              resemblance: current.aiUpscalerResemblance,
             },
             outputVersionIds: [versionId],
             createdAt,
@@ -4522,7 +4605,9 @@ export function ProjectWorkspace(props: {
           onMultiAnglePrecisionChange={setMultiAnglePrecision}
           onHeadswapHairModeChange={setHeadswapHairMode}
           onUpscalerScaleChange={setUpscalerScale}
-          onUpscalerFocusChange={setUpscalerFocus}
+          onUpscalerModeChange={setUpscalerMode}
+          onUpscalerCreativityChange={setUpscalerCreativity}
+          onUpscalerResemblanceChange={setUpscalerResemblance}
           onModelInfluencePromptChange={setModelInfluencePrompt}
           onModelInfluenceStrengthChange={setModelInfluenceStrength}
           onStyleTransferPromptChange={setStyleTransferPrompt}

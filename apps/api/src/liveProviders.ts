@@ -779,25 +779,29 @@ export async function runLiveUpscaleJob(snapshot: WorkspaceSnapshot, job: Genera
 
   const sourceDataUrl = await assetUrlToDataUrl(sourceAsset.url, sourceAsset.mimeType);
   const scale = String(input.scale ?? '2k').toLowerCase();
-  
-  let generatedDataUrl: string;
-  let modelName = 'fal-ai/clarity-upscaler';
+  const mode = String(input.mode ?? 'creative').toLowerCase() as 'creative' | 'precision';
+  const creativity = typeof input.creativity === 'number' ? input.creativity : 0.35;
+  const resemblance = typeof input.resemblance === 'number' ? input.resemblance : 0.6;
+  const upscaleFactor = scale === '4k' ? 4 : 2;
 
-  if (scale === '4k') {
-    modelName = 'fal-ai/aura-sr';
-    const outputs = await runFalModelQueued(modelName, {
+  let generatedDataUrl: string;
+
+  if (mode === 'precision') {
+    // Precision mode: fal-ai/aura-sr — faithful, high-frequency detail
+    const outputs = await runFalModelQueued('fal-ai/aura-sr', {
       image_url: sourceDataUrl,
-      upscale_factor: 4,
+      upscale_factor: upscaleFactor,
       overlapping_tiles: true,
       checkpoint: 'v2',
     });
     generatedDataUrl = outputs[0];
   } else {
-    const outputs = await runFalModelQueued(modelName, {
+    // Creative mode: fal-ai/clarity-upscaler — user-controlled creativity + resemblance
+    const outputs = await runFalModelQueued('fal-ai/clarity-upscaler', {
       image_url: sourceDataUrl,
-      upscale_factor: 2,
-      creativity: 0.2,
-      resemblance: 0.82,
+      upscale_factor: upscaleFactor,
+      creativity,
+      resemblance,
     });
     generatedDataUrl = outputs[0];
   }
