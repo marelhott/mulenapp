@@ -34,26 +34,55 @@ export function App() {
     let active = true;
 
     async function loadWorkspace() {
-      try {
-        const [config, project] = await Promise.all([
-          api.getConfig(),
-          api.getProject(mockWorkspaceSnapshot.project.id),
-        ]);
+      let configError: string | null = null;
 
+      // Load config independently so apiConfig is always set even if project load fails
+      try {
+        const config = await api.getConfig();
+        if (active) setApiConfig(config);
+      } catch (error) {
+        configError = error instanceof Error ? error.message : 'Nepodarilo se nacist konfiguraci backendu.';
+      }
+
+      try {
+        const project = await api.getProject(mockWorkspaceSnapshot.project.id);
         if (!active) return;
-        setApiConfig(config);
         setSnapshot(project);
-        setLoadingError(null);
+        setLoadingError(configError);
       } catch (error) {
         if (!active) return;
-        setLoadingError(error instanceof Error ? error.message : 'Nepodarilo se nacist backend.');
+        const projectError = error instanceof Error ? error.message : 'Nepodarilo se nacist projekt.';
+        setLoadingError(configError ?? projectError);
       }
     }
 
     void loadWorkspace();
 
+    // Retry every 3 seconds until apiConfig is loaded (handles API server starting after page load)
+    const retryInterval = window.setInterval(async () => {
+      if (!active) return;
+      try {
+        const config = await api.getConfig();
+        if (active) {
+          setApiConfig(config);
+          setLoadingError(null);
+          window.clearInterval(retryInterval);
+          // Also reload project snapshot on successful reconnect
+          try {
+            const project = await api.getProject(mockWorkspaceSnapshot.project.id);
+            if (active) setSnapshot(project);
+          } catch {
+            // project load failure is non-critical
+          }
+        }
+      } catch {
+        // still offline, keep retrying
+      }
+    }, 3000);
+
     return () => {
       active = false;
+      window.clearInterval(retryInterval);
     };
   }, []);
 
