@@ -201,6 +201,30 @@ function MainCanvas(props: {
   onDeleteRow?: (jobId: string) => void;
 }) {
   const [zoomedVersionId, setZoomedVersionId] = useState<string | null>(null);
+  // Feed layout: 'row' (grouped with headers) | 'grid' (flat masonry)
+  const [feedLayout, setFeedLayout] = useState<'row' | 'grid'>('row');
+  // Selected version IDs for batch delete
+  const [selectedVersionIds, setSelectedVersionIds] = useState<Set<string>>(new Set());
+
+  const toggleSelectVersion = (versionId: string) => {
+    setSelectedVersionIds(prev => {
+      const next = new Set(prev);
+      if (next.has(versionId)) next.delete(versionId); else next.add(versionId);
+      return next;
+    });
+  };
+  const selectAllInRow = (row: { cards: Array<{ versionId: string }> }) => {
+    const ids = row.cards.map(c => c.versionId).filter(Boolean);
+    setSelectedVersionIds(prev => {
+      const allSelected = ids.every(id => prev.has(id));
+      const next = new Set(prev);
+      if (allSelected) { ids.forEach(id => next.delete(id)); }
+      else { ids.forEach(id => next.add(id)); }
+      return next;
+    });
+  };
+  const clearSelection = () => setSelectedVersionIds(new Set());
+
   // Detail modal zoom state
   const [modalZoom, setModalZoom] = useState(1);
   const [modalPan, setModalPan] = useState({ x: 0, y: 0 });
@@ -454,15 +478,25 @@ function MainCanvas(props: {
                       <span>Academy</span>
                     </button>
                   </nav>
-                  <div className="nano-creations-toolbar-actions">
-                    <button type="button" className="active" aria-label="List view">
-                      <List size={16} />
+                  {/* Right side — Magnific: bg-default-0 relative flex h-8 items-center gap-1 rounded-lg pl-1 pr-2 */}
+                  <div className="nano-creations-layout-switcher">
+                    <button
+                      type="button"
+                      data-cy="projects-layout-option-row"
+                      className={feedLayout === 'row' ? 'active' : ''}
+                      aria-label="Row layout"
+                      onClick={() => setFeedLayout('row')}
+                    >
+                      <List size={14} />
                     </button>
-                    <button type="button" aria-label="Grid view">
-                      <Grid2x2 size={16} />
-                    </button>
-                    <button type="button" aria-label="More options">
-                      <ChevronDown size={16} />
+                    <button
+                      type="button"
+                      data-cy="projects-layout-option-grid"
+                      className={feedLayout === 'grid' ? 'active' : ''}
+                      aria-label="Grid layout"
+                      onClick={() => setFeedLayout('grid')}
+                    >
+                      <Grid2x2 size={14} />
                     </button>
                   </div>
                 </header>
@@ -479,15 +513,68 @@ function MainCanvas(props: {
                       <p>Zadejte prompt v postrannim panelu (vlevo) a zacnete tvorit</p>
                     </div>
                   </div>
+                ) : feedLayout === 'grid' ? (
+                  /* ── Flat grid layout — Magnific: all images, no row headers ── */
+                  <div className="nano-creation-flat-grid">
+                    {creationRows.flatMap(row => row.cards).map(card => {
+                      const row = creationRows.find(r => r.cards.some(c => c.id === card.id))!;
+                      const isSelected = card.versionId ? selectedVersionIds.has(card.versionId) : false;
+                      return (
+                        <div key={card.id} className={`nano-creation-card-wrap${isSelected ? ' is-selected' : ''}`}>
+                          <div
+                            role="button"
+                            tabIndex={card.url ? 0 : -1}
+                            className={card.url ? 'nano-creation-card' : 'nano-creation-card is-loading'}
+                            style={{ aspectRatio: getAspectRatioValue(row.aspectRatio) }}
+                            onClick={() => {
+                              if (!card.url) return;
+                              const allCards = row.cards.filter(c => c.url).map(c => ({ ...c, prompt: row.prompt, aspectRatio: row.aspectRatio, modelLabel: row.modelLabel, createdAt: row.createdAt }));
+                              const clickedIndex = allCards.findIndex(c => c.id === card.id);
+                              setDetailModal({ cards: allCards, index: Math.max(0, clickedIndex) }); setModalZoom(1); setModalPan({ x: 0, y: 0 });
+                              if (card.versionId) props.onSelectVersion(card.versionId);
+                            }}
+                          >
+                            {card.url ? (
+                              <img src={card.url} alt={card.label || row.prompt} />
+                            ) : (
+                              <div className="nano-creation-card-loading">
+                                <p className="nano-creation-card-loading-label">Generuji…</p>
+                                <div className="nano-creation-progress-track"><div className="nano-creation-progress-fill" /></div>
+                              </div>
+                            )}
+                            {card.url && (
+                              <div className="nano-creation-card-badges">
+                                <div className="nano-creation-card-badge"><ImageIcon size={10} /><strong>{card.resolution}</strong></div>
+                              </div>
+                            )}
+                          </div>
+                          {/* Checkbox — Magnific: absolute left-2.5 top-2.5 z-30, opacity-0 group-hover/item:opacity-100 */}
+                          {card.versionId ? (
+                            <button
+                              type="button"
+                              className={`nano-creation-card-checkbox${isSelected ? ' is-checked' : ''}`}
+                              aria-label="Vybrat obrázek"
+                              aria-pressed={isSelected}
+                              onClick={(e) => { e.stopPropagation(); toggleSelectVersion(card.versionId); }}
+                            >
+                              {isSelected && <X size={10} />}
+                            </button>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
                 ) : (
-                  creationRows.map((row) => (
+                  /* ── Row layout — Magnific: grouped rows with headers ── */
+                  creationRows.map((row) => {
+                    const rowVersionIds = row.cards.map(c => c.versionId).filter(Boolean);
+                    const allRowSelected = rowVersionIds.length > 0 && rowVersionIds.every(id => selectedVersionIds.has(id));
+                    return (
                     <article className="nano-creation-row" key={row.id}>
                       {/* Row header — Magnific: rounded-t-xl bg-panel-6 p-3 */}
                       <div className="nano-creation-row-header">
                         <div className="nano-creation-row-header-left">
-                          <p className="nano-creation-prompt" title={row.prompt}>
-                            {row.prompt}
-                          </p>
+                          <p className="nano-creation-prompt" title={row.prompt}>{row.prompt}</p>
                           <div className="nano-creation-meta">
                             {row.aspectRatio && <span className="nano-creation-chip">{row.aspectRatio}</span>}
                             {row.modelLabel && <span className="nano-creation-chip">{row.modelLabel}</span>}
@@ -496,23 +583,27 @@ function MainCanvas(props: {
                         </div>
                         <div className="nano-creation-row-header-right">
                           <span className="nano-creation-time">{formatRelativeTimeLabel(row.createdAt)}</span>
-                          {row.id !== 'pending-generation' && props.onDeleteRow ? (
+                          {/* Select-all checkbox — Magnific: data-cy="select-all-row-button" */}
+                          {row.id !== 'pending-generation' && rowVersionIds.length > 0 ? (
                             <button
                               type="button"
-                              className="nano-creation-row-delete"
-                              aria-label="Smazat celý řádek"
-                              onClick={(e) => { e.stopPropagation(); props.onDeleteRow!(row.id); }}
+                              data-cy="select-all-row-button"
+                              className={`nano-creation-select-all${allRowSelected ? ' is-checked' : ''}`}
+                              aria-label="Vybrat vše v řádku"
+                              aria-pressed={allRowSelected}
+                              onClick={(e) => { e.stopPropagation(); selectAllInRow(row); }}
                             >
-                              <X size={12} />
+                              {allRowSelected && <X size={10} />}
                             </button>
                           ) : null}
                         </div>
                       </div>
                       {/* Grid — Magnific: grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3 px-3 pb-3 bg-panel-6 rounded-b-xl */}
                       <div className="nano-creation-strip">
-                        {row.cards.map((card, cardIndex) => (
-                          <div key={card.id} className="nano-creation-card-wrap">
-                            {/* Card — Magnific: group/item relative overflow-hidden rounded-xl bg-surface-1 cursor-pointer */}
+                        {row.cards.map((card, cardIndex) => {
+                          const isSelected = card.versionId ? selectedVersionIds.has(card.versionId) : false;
+                          return (
+                          <div key={card.id} className={`nano-creation-card-wrap${isSelected ? ' is-selected' : ''}`}>
                             <div
                               role="button"
                               tabIndex={card.url ? 0 : -1}
@@ -520,26 +611,14 @@ function MainCanvas(props: {
                               style={{ aspectRatio: getAspectRatioValue(row.aspectRatio) }}
                               onClick={() => {
                                 if (!card.url) return;
-                                const allCards = row.cards.filter(c => c.url).map(c => ({
-                                  ...c,
-                                  prompt: row.prompt,
-                                  aspectRatio: row.aspectRatio,
-                                  modelLabel: row.modelLabel,
-                                  createdAt: row.createdAt,
-                                }));
+                                const allCards = row.cards.filter(c => c.url).map(c => ({ ...c, prompt: row.prompt, aspectRatio: row.aspectRatio, modelLabel: row.modelLabel, createdAt: row.createdAt }));
                                 const clickedIndex = allCards.findIndex(c => c.id === card.id);
                                 setDetailModal({ cards: allCards, index: Math.max(0, clickedIndex) }); setModalZoom(1); setModalPan({ x: 0, y: 0 });
                                 if (card.versionId) props.onSelectVersion(card.versionId);
                               }}
                               onKeyDown={(e) => {
                                 if ((e.key === 'Enter' || e.key === ' ') && card.url) {
-                                  const allCards = row.cards.filter(c => c.url).map(c => ({
-                                    ...c,
-                                    prompt: row.prompt,
-                                    aspectRatio: row.aspectRatio,
-                                    modelLabel: row.modelLabel,
-                                    createdAt: row.createdAt,
-                                  }));
+                                  const allCards = row.cards.filter(c => c.url).map(c => ({ ...c, prompt: row.prompt, aspectRatio: row.aspectRatio, modelLabel: row.modelLabel, createdAt: row.createdAt }));
                                   const clickedIndex = allCards.findIndex(c => c.id === card.id);
                                   setDetailModal({ cards: allCards, index: Math.max(0, clickedIndex) }); setModalZoom(1); setModalPan({ x: 0, y: 0 });
                                 }
@@ -548,42 +627,65 @@ function MainCanvas(props: {
                               {card.url ? (
                                 <img src={card.url} alt={card.label || row.prompt} />
                               ) : (
-                                /* Loading overlay — Magnific: absolute inset-0 flex flex-col items-center justify-center bg-surface-0/95 */
                                 <div className="nano-creation-card-loading">
                                   <p className="nano-creation-card-loading-label">
                                     {(row.cards.length > 1) ? `${cardIndex + 1} / ${row.cards.length}` : 'Generuji…'}
                                   </p>
-                                  <div className="nano-creation-progress-track">
-                                    <div className="nano-creation-progress-fill" />
-                                  </div>
+                                  <div className="nano-creation-progress-track"><div className="nano-creation-progress-fill" /></div>
                                 </div>
                               )}
-                              {/* Bottom-left badge — resolution — Magnific: fades on hover */}
                               {card.url && (
                                 <div className="nano-creation-card-badges">
-                                  <div className="nano-creation-card-badge">
-                                    <ImageIcon size={10} />
-                                    <strong>{card.resolution}</strong>
-                                  </div>
+                                  <div className="nano-creation-card-badge"><ImageIcon size={10} /><strong>{card.resolution}</strong></div>
                                 </div>
                               )}
                             </div>
-                            {/* X delete button */}
-                            {card.versionId && props.onDeleteVersion ? (
+                            {/* Checkbox — Magnific: data-cy="thumbnail-checkbox", top-left, opacity-0 → opacity-100 on hover */}
+                            {card.versionId ? (
                               <button
                                 type="button"
-                                className="nano-creation-card-delete"
-                                aria-label="Smazat obrázek"
-                                onClick={(e) => { e.stopPropagation(); props.onDeleteVersion!(card.versionId); }}
+                                data-cy="thumbnail-checkbox"
+                                className={`nano-creation-card-checkbox${isSelected ? ' is-checked' : ''}`}
+                                aria-label="Vybrat obrázek"
+                                aria-pressed={isSelected}
+                                onClick={(e) => { e.stopPropagation(); toggleSelectVersion(card.versionId); }}
                               >
-                                <X size={10} />
+                                {isSelected && <X size={10} />}
                               </button>
                             ) : null}
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </article>
-                  ))
+                    );
+                  })
+                )}
+                {/* Batch action bar — appears when items selected */}
+                {selectedVersionIds.size > 0 && (
+                  <div className="nano-batch-action-bar">
+                    <span className="nano-batch-action-count">{selectedVersionIds.size} vybráno</span>
+                    <button
+                      type="button"
+                      className="nano-batch-action-delete"
+                      aria-label="Smazat vybrané"
+                      onClick={() => {
+                        selectedVersionIds.forEach(id => props.onDeleteVersion?.(id));
+                        clearSelection();
+                      }}
+                    >
+                      <X size={14} />
+                      <span>Smazat</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="nano-batch-action-cancel"
+                      aria-label="Zrušit výběr"
+                      onClick={clearSelection}
+                    >
+                      Zrušit
+                    </button>
+                  </div>
                 )}
                 </div>
               </section>

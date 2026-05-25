@@ -4278,15 +4278,13 @@ select,
   backdrop-filter: blur(10px);
 }
 
-.nano-creations-tabs,
-.nano-creations-toolbar-actions {
+.nano-creations-tabs {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.nano-creations-tabs button,
-.nano-creations-toolbar-actions button {
+.nano-creations-tabs button {
   min-height: 34px;
   border: 0;
   border-radius: 0;
@@ -4302,18 +4300,57 @@ select,
   box-shadow: none;
 }
 
-.nano-creations-tabs button.active,
-.nano-creations-toolbar-actions button.active {
+.nano-creations-tabs button.active {
   background: transparent;
   color: #2c302c;
   box-shadow: none;
 }
 
-.nano-creations-toolbar-actions button {
-  width: auto;
-  min-width: 0;
+/* Layout switcher — Magnific: bg-default-0 relative flex h-8 items-center gap-1 rounded-lg pl-1 pr-2 */
+.nano-creations-layout-switcher {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 32px;
+  padding: 2px 6px;
+  background: #f0f0ee;
+  border-radius: 10px;
+}
+
+.nano-creations-layout-switcher button {
+  display: flex;
+  align-items: center;
   justify-content: center;
-  padding: 0 4px;
+  width: 28px;
+  height: 24px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #585d57;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  opacity: 0.5;
+  padding: 0;
+}
+
+.nano-creations-layout-switcher button:hover {
+  opacity: 1;
+}
+
+.nano-creations-layout-switcher button.active {
+  background: #ffffff;
+  color: #1a1a1a;
+  opacity: 1;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.app-shell-dark .nano-creations-layout-switcher {
+  background: rgba(255,255,255,0.07);
+}
+
+.app-shell-dark .nano-creations-layout-switcher button.active {
+  background: rgba(255,255,255,0.12);
+  color: #fff;
 }
 
 /* ── Magnific feed layout ──────────────────────────────────────── */
@@ -4623,6 +4660,139 @@ select,
 
 .nano-creation-card-delete:hover {
   background: rgba(200, 40, 40, 0.75);
+}
+
+/* Checkbox — Magnific: data-cy="thumbnail-checkbox"
+   absolute left-2.5 top-2.5 z-30, opacity-0 group-hover/item:opacity-100
+   size-6, rounded-full, bg-surface-modal */
+.nano-creation-card-checkbox {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid rgba(255,255,255,0.6);
+  background: rgba(255,255,255,0.85);
+  backdrop-filter: blur(4px);
+  color: #1a1a1a;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s, background 0.15s, border-color 0.15s;
+  z-index: 30;
+  padding: 0;
+}
+
+.nano-creation-card-wrap:hover .nano-creation-card-checkbox {
+  opacity: 1;
+}
+
+.nano-creation-card-checkbox.is-checked {
+  background: #1a1a1a;
+  border-color: #1a1a1a;
+  color: #fff;
+  opacity: 1;
+}
+
+.nano-creation-card-wrap.is-selected .nano-creation-card {
+  outline: 2px solid #1a1a1a;
+  outline-offset: 2px;
+}
+
+/* Select-all button in row header — Magnific: data-cy="select-all-row-button" */
+.nano-creation-select-all {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: 2px solid #b0b3ae;
+  background: transparent;
+  color: #1a1a1a;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  padding: 0;
+}
+
+.nano-creation-select-all:hover {
+  border-color: #585d57;
+}
+
+.nano-creation-select-all.is-checked {
+  background: #1a1a1a;
+  border-color: #1a1a1a;
+  color: #fff;
+}
+
+/* Flat grid layout (grid mode) */
+.nano-creation-flat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+  padding: 8px 0 16px;
+}
+
+/* Batch action bar — appears at bottom when items selected */
+.nano-batch-action-bar {
+  position: sticky;
+  bottom: 12px;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #1a1a1a;
+  color: #fff;
+  border-radius: 12px;
+  padding: 10px 14px;
+  margin-top: 8px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.25);
+  z-index: 50;
+}
+
+.nano-batch-action-count {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.nano-batch-action-delete {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(220, 50, 50, 0.85);
+  color: #fff;
+  border: 0;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.nano-batch-action-delete:hover {
+  background: rgba(200, 30, 30, 1);
+}
+
+.nano-batch-action-cancel {
+  background: rgba(255,255,255,0.12);
+  color: rgba(255,255,255,0.8);
+  border: 0;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.nano-batch-action-cancel:hover {
+  background: rgba(255,255,255,0.2);
 }
 
 .nano-main-empty-state {
