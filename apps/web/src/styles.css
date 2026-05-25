@@ -927,6 +927,12 @@ button.primary:hover {
   border: 1px solid rgba(16, 16, 16, 0.1);
   border-radius: 8px;
   background: #ffffff;
+  transition: border-color 0.15s;
+}
+
+.nano-prompt-surface:focus-within {
+  border-color: rgba(16, 16, 16, 0.18);
+  outline: none;
 }
 
 .nano-prompt-surface-textarea {
@@ -934,6 +940,8 @@ button.primary:hover {
   min-height: 103px;
   padding: 0;
   border: 0;
+  outline: none;
+  box-shadow: none;
   resize: none;
   background: transparent;
   color: #1a1a1a;
@@ -4734,65 +4742,6 @@ select,
   background: rgba(115, 115, 115, 0.08) !important;
   color: #1a1a1a !important;
   font-weight: 600 !important;
-}
-
-/* ── Delete buttons for creation rows & cards ──────────────── */
-.nano-creation-row-delete {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  border: 0;
-  background: transparent;
-  border-radius: 4px;
-  color: rgba(26, 26, 26, 0.35);
-  cursor: pointer;
-  flex-shrink: 0;
-  opacity: 0;
-  transition: opacity 0.15s, background 0.15s, color 0.15s;
-  margin-left: 4px;
-}
-
-.nano-creation-row:hover .nano-creation-row-delete {
-  opacity: 1;
-}
-
-.nano-creation-row-delete:hover {
-  background: rgba(200, 40, 40, 0.08);
-  color: #c82828;
-}
-
-.nano-creation-card-wrap {
-  position: relative;
-  display: inline-flex;
-}
-
-.nano-creation-card-delete {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  border-radius: 4px;
-  border: 0;
-  background: rgba(0, 0, 0, 0.45);
-  color: #ffffff;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.15s, background 0.15s;
-  z-index: 10;
-}
-
-.nano-creation-card-wrap:hover .nano-creation-card-delete {
-  opacity: 1;
-}
-
-.nano-creation-card-delete:hover {
-  background: rgba(180, 30, 30, 0.85);
 }
 
 /* ── Upscaler Controls ─────────────────────────────────────────── */

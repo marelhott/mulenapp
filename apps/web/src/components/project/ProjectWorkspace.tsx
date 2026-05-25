@@ -201,6 +201,10 @@ function MainCanvas(props: {
   onDeleteRow?: (jobId: string) => void;
 }) {
   const [zoomedVersionId, setZoomedVersionId] = useState<string | null>(null);
+  // Detail modal zoom state
+  const [modalZoom, setModalZoom] = useState(1);
+  const [modalPan, setModalPan] = useState({ x: 0, y: 0 });
+  const modalDragRef = useRef<{ dragging: boolean; startX: number; startY: number; startPanX: number; startPanY: number }>({ dragging: false, startX: 0, startY: 0, startPanX: 0, startPanY: 0 });
   // Detail modal state — Magnific-style full overlay
   const [detailModal, setDetailModal] = useState<{
     cards: Array<{ id: string; versionId: string; url: string; label?: string; resolution: string; prompt: string; aspectRatio: string; modelLabel: string; createdAt: string }>;
@@ -524,7 +528,7 @@ function MainCanvas(props: {
                                   createdAt: row.createdAt,
                                 }));
                                 const clickedIndex = allCards.findIndex(c => c.id === card.id);
-                                setDetailModal({ cards: allCards, index: Math.max(0, clickedIndex) });
+                                setDetailModal({ cards: allCards, index: Math.max(0, clickedIndex) }); setModalZoom(1); setModalPan({ x: 0, y: 0 });
                                 if (card.versionId) props.onSelectVersion(card.versionId);
                               }}
                               onKeyDown={(e) => {
@@ -537,7 +541,7 @@ function MainCanvas(props: {
                                     createdAt: row.createdAt,
                                   }));
                                   const clickedIndex = allCards.findIndex(c => c.id === card.id);
-                                  setDetailModal({ cards: allCards, index: Math.max(0, clickedIndex) });
+                                  setDetailModal({ cards: allCards, index: Math.max(0, clickedIndex) }); setModalZoom(1); setModalPan({ x: 0, y: 0 });
                                 }
                               }}
                             >
@@ -661,7 +665,7 @@ function MainCanvas(props: {
                 type="button"
                 className="mag-modal-prev"
                 disabled={detailModal.index <= 0}
-                onClick={() => setDetailModal(m => m ? { ...m, index: m.index - 1 } : null)}
+                onClick={() => { setDetailModal(m => m ? { ...m, index: m.index - 1 } : null); setModalZoom(1); setModalPan({ x: 0, y: 0 }); }}
               >
                 <ChevronDown size={16} style={{ transform: 'rotate(90deg)' }} />
               </button>
@@ -670,14 +674,41 @@ function MainCanvas(props: {
                 type="button"
                 className="mag-modal-next"
                 disabled={detailModal.index >= detailModal.cards.length - 1}
-                onClick={() => setDetailModal(m => m ? { ...m, index: m.index + 1 } : null)}
+                onClick={() => { setDetailModal(m => m ? { ...m, index: m.index + 1 } : null); setModalZoom(1); setModalPan({ x: 0, y: 0 }); }}
               >
                 <ChevronDown size={16} style={{ transform: 'rotate(-90deg)' }} />
               </button>
 
-              {/* Left: image */}
-              <div className="mag-modal-image-side">
-                <img src={card.url} alt={card.label || card.prompt} />
+              {/* Left: image (with scroll zoom + drag pan) */}
+              <div
+                className="mag-modal-image-side"
+                style={{ overflow: 'hidden', cursor: modalZoom > 1 ? 'grab' : 'default' }}
+                onWheel={(e) => {
+                  e.preventDefault();
+                  const next = Math.max(1, Math.min(8, modalZoom * (e.deltaY < 0 ? 1.12 : 0.89)));
+                  if (next === 1) setModalPan({ x: 0, y: 0 });
+                  setModalZoom(next);
+                }}
+                onMouseDown={(e) => {
+                  if (modalZoom <= 1) return;
+                  modalDragRef.current = { dragging: true, startX: e.clientX, startY: e.clientY, startPanX: modalPan.x, startPanY: modalPan.y };
+                  (e.currentTarget as HTMLElement).style.cursor = 'grabbing';
+                  e.preventDefault();
+                }}
+                onMouseMove={(e) => {
+                  if (!modalDragRef.current.dragging) return;
+                  setModalPan({ x: modalDragRef.current.startPanX + (e.clientX - modalDragRef.current.startX) / modalZoom, y: modalDragRef.current.startPanY + (e.clientY - modalDragRef.current.startY) / modalZoom });
+                }}
+                onMouseUp={(e) => { modalDragRef.current.dragging = false; (e.currentTarget as HTMLElement).style.cursor = modalZoom > 1 ? 'grab' : 'default'; }}
+                onMouseLeave={(e) => { modalDragRef.current.dragging = false; (e.currentTarget as HTMLElement).style.cursor = 'default'; }}
+                onDoubleClick={() => { setModalZoom(1); setModalPan({ x: 0, y: 0 }); }}
+              >
+                <img
+                  src={card.url}
+                  alt={card.label || card.prompt}
+                  style={{ transform: `scale(${modalZoom}) translate(${modalPan.x}px, ${modalPan.y}px)`, transition: modalDragRef.current.dragging ? 'none' : 'transform 0.15s', userSelect: 'none', pointerEvents: 'none' }}
+                  draggable={false}
+                />
               </div>
 
               {/* Right: sidebar */}
@@ -1722,6 +1753,15 @@ function headswapStatus(assetId?: string) {
   return assetId ? 'nacteno' : 'chybi';
 }
 
+function isRealAsset(asset: Asset | undefined): boolean {
+  if (!asset) return false;
+  const url = asset.url || '';
+  const path = asset.storagePath || '';
+  if (url.includes('unsplash.com') || url.includes('images.unsplash')) return false;
+  if (path.startsWith('mock/') || path.includes('/mock/')) return false;
+  return true;
+}
+
 function getRouteUploadConfigs(input: {
   route: NanoRoute;
   originalAsset?: Asset;
@@ -1732,7 +1772,8 @@ function getRouteUploadConfigs(input: {
   styleSlotAsset?: Asset;
   brandSlotAsset?: Asset;
 }) {
-  const baseStyleHelper = input.referenceAssets[0]?.storagePath ?? 'Stylove reference a look-and-feel';
+  const realReferenceAssets = input.referenceAssets.filter(isRealAsset);
+  const baseStyleHelper = realReferenceAssets[0]?.storagePath ?? 'Stylove reference a look-and-feel';
 
   switch (input.route) {
     case 'face-swap':
@@ -1742,27 +1783,27 @@ function getRouteUploadConfigs(input: {
           dragKey: 'input' as const,
           mode: 'source-face' as const,
           title: 'Zdrojova hlava',
-          count: input.headswapSourceAsset ? 1 : 0,
-          helper: input.headswapSourceAsset?.storagePath ?? 'Nahraj source face / head',
-          asset: input.headswapSourceAsset,
+          count: isRealAsset(input.headswapSourceAsset) ? 1 : 0,
+          helper: isRealAsset(input.headswapSourceAsset) ? input.headswapSourceAsset?.storagePath : 'Nahraj source face / head',
+          asset: isRealAsset(input.headswapSourceAsset) ? input.headswapSourceAsset : undefined,
         },
         {
           id: 'nano-target-scene-upload',
           dragKey: 'style' as const,
           mode: 'target-scene' as const,
           title: 'Cilovy obrazek',
-          count: input.headswapTargetAsset ? 1 : 0,
-          helper: input.headswapTargetAsset?.storagePath ?? 'Nahraj target image',
-          asset: input.headswapTargetAsset,
+          count: isRealAsset(input.headswapTargetAsset) ? 1 : 0,
+          helper: isRealAsset(input.headswapTargetAsset) ? input.headswapTargetAsset?.storagePath : 'Nahraj target image',
+          asset: isRealAsset(input.headswapTargetAsset) ? input.headswapTargetAsset : undefined,
         },
         {
           id: 'nano-headswap-ref-upload',
           dragKey: 'brand' as const,
           mode: 'style' as const,
           title: 'Reference',
-          count: input.referenceAssets.length,
-          helper: input.styleSlotAsset?.storagePath ?? baseStyleHelper,
-          asset: input.styleSlotAsset,
+          count: realReferenceAssets.length,
+          helper: isRealAsset(input.styleSlotAsset) ? input.styleSlotAsset?.storagePath : baseStyleHelper,
+          asset: isRealAsset(input.styleSlotAsset) ? input.styleSlotAsset : undefined,
         },
       ];
     case 'reframe':
@@ -1772,26 +1813,27 @@ function getRouteUploadConfigs(input: {
           dragKey: 'input' as const,
           mode: 'input' as const,
           title: 'Zdrojovy zaber',
-          count: input.originalAsset ? 1 : 0,
-          helper: input.originalAsset?.storagePath ?? 'Nahraj produkt nebo scenu',
+          count: isRealAsset(input.originalAsset) ? 1 : 0,
+          helper: isRealAsset(input.originalAsset) ? input.originalAsset?.storagePath : 'Nahraj produkt nebo scenu',
+          asset: isRealAsset(input.originalAsset) ? input.originalAsset : undefined,
         },
         {
           id: 'nano-reframe-style-upload',
           dragKey: 'style' as const,
           mode: 'style' as const,
           title: 'Prostredi',
-          count: input.referenceAssets.length,
-          helper: input.styleSlotAsset?.storagePath ?? baseStyleHelper,
-          asset: input.styleSlotAsset,
+          count: realReferenceAssets.length,
+          helper: isRealAsset(input.styleSlotAsset) ? input.styleSlotAsset?.storagePath : baseStyleHelper,
+          asset: isRealAsset(input.styleSlotAsset) ? input.styleSlotAsset : undefined,
         },
         {
           id: 'nano-reframe-brand-upload',
           dragKey: 'brand' as const,
           mode: 'brand' as const,
           title: 'Brand prvky',
-          count: input.brandSlotAsset ? 1 : input.lockedCount,
-          helper: input.brandSlotAsset?.storagePath ?? 'Logo, material, mistnost nebo produkt ktery musi zustat konzistentni.',
-          asset: input.brandSlotAsset,
+          count: isRealAsset(input.brandSlotAsset) ? 1 : 0,
+          helper: isRealAsset(input.brandSlotAsset) ? input.brandSlotAsset?.storagePath : 'Logo, material, mistnost nebo produkt ktery musi zustat konzistentni.',
+          asset: isRealAsset(input.brandSlotAsset) ? input.brandSlotAsset : undefined,
         },
       ];
     default:
@@ -1800,28 +1842,28 @@ function getRouteUploadConfigs(input: {
           id: 'nano-input-upload',
           dragKey: 'input' as const,
           mode: 'input' as const,
-          title: 'imput images',
-          count: input.originalAsset ? 1 : 0,
-          helper: input.originalAsset ? undefined : 'Nahraj hlavni source fotku',
-          asset: input.originalAsset,
+          title: 'Input images',
+          count: isRealAsset(input.originalAsset) ? 1 : 0,
+          helper: isRealAsset(input.originalAsset) ? input.originalAsset?.storagePath : 'Nahraj hlavni source fotku',
+          asset: isRealAsset(input.originalAsset) ? input.originalAsset : undefined,
         },
         {
           id: 'nano-style-upload',
           dragKey: 'style' as const,
           mode: 'style' as const,
-          title: 'reference images',
-          count: input.referenceAssets.length,
-          helper: input.styleSlotAsset?.storagePath ?? baseStyleHelper,
-          asset: input.styleSlotAsset,
+          title: 'Reference images',
+          count: realReferenceAssets.length,
+          helper: isRealAsset(input.styleSlotAsset) ? input.styleSlotAsset?.storagePath : baseStyleHelper,
+          asset: isRealAsset(input.styleSlotAsset) ? input.styleSlotAsset : undefined,
         },
         {
           id: 'nano-brand-upload',
           dragKey: 'brand' as const,
           mode: 'brand' as const,
-          title: 'proprietal images',
-          count: input.brandSlotAsset ? 1 : input.lockedCount,
-          helper: input.brandSlotAsset?.storagePath ?? 'Logo / klobouk / boty / produkt. Neovlivnuje styl, pouze obsahove doplneni vystupu.',
-          asset: input.brandSlotAsset,
+          title: 'Proprietal images',
+          count: isRealAsset(input.brandSlotAsset) ? 1 : 0,
+          helper: isRealAsset(input.brandSlotAsset) ? input.brandSlotAsset?.storagePath : 'Logo / produkt. Neovlivnuje styl, pouze obsahove doplneni vystupu.',
+          asset: isRealAsset(input.brandSlotAsset) ? input.brandSlotAsset : undefined,
         },
       ];
   }
