@@ -1319,12 +1319,13 @@ export async function processJob(jobId: string) {
       snapshot: {
         ...store.snapshot,
         jobs: updateJob(store.snapshot, jobId, {
-          status: 'running',
-          progress: 55,
-          error: error instanceof Error ? error.message : 'Live provider failed, falling back to mock execution.',
+          status: 'failed',
+          progress: 0,
+          error: error instanceof Error ? error.message : 'Generování selhalo.',
         }),
       },
     }));
+    return;
   }
 
   await updateStore((store) => {

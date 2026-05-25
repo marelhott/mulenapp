@@ -102,7 +102,7 @@ function createWorkspaceState(snapshot: WorkspaceSnapshot): WorkspaceState {
     photoDirectorInstruction: '',
     photoDirectorLockedText: '',
     photoDirectorOutputCount: 2,
-    photoDirectorAspectRatio: 'original',
+    photoDirectorAspectRatio: 'square',
     photoDirectorPolishMode: 'focused',
     variantLabCount: 8,
     variantLabIntensity: 'stredne',
@@ -550,7 +550,6 @@ function MainCanvas(props: {
                               ) : (
                                 /* Loading overlay — Magnific: absolute inset-0 flex flex-col items-center justify-center bg-surface-0/95 */
                                 <div className="nano-creation-card-loading">
-                                  <Sparkles className="nano-creation-card-loading-icon" size={20} />
                                   <p className="nano-creation-card-loading-label">
                                     {(row.cards.length > 1) ? `${cardIndex + 1} / ${row.cards.length}` : 'Generuji…'}
                                   </p>

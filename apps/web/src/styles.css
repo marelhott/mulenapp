@@ -4603,17 +4603,18 @@ select,
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 99px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
   border: 0;
-  background: rgba(20, 20, 20, 0.35);
-  backdrop-filter: blur(8px);
+  background: rgba(20, 20, 20, 0.55);
   color: #ffffff;
   cursor: pointer;
   opacity: 0;
   transition: opacity 0.2s, background 0.2s;
   z-index: 30;
+  padding: 0;
+  line-height: 1;
 }
 
 .nano-creation-card-wrap:hover .nano-creation-card-delete {

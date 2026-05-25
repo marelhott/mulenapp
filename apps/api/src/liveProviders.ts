@@ -1,7 +1,7 @@
 import type { Asset, EditStep, GenerationJob, ImageVersion, ModelRun, QualityEvaluation, WorkspaceSnapshot } from '@mulen/shared';
 import { canUseSupabaseStorage, persistGeneratedImageMetadata, uploadDataUrlToSupabase } from './supabaseStorage.js';
 
-const GEMINI_IMAGE_MODEL = 'gemini-3.1-flash-image-preview';
+const GEMINI_IMAGE_MODEL = 'gemini-2.0-flash-preview-image-generation';
 const GEMINI_TEXT_MODEL = 'gemini-2.5-flash';
 const PROMPT_ENHANCER_SYSTEM_PROMPT = `You are a strict and disciplined AI prompt enhancer for image generation.
 
@@ -806,6 +806,7 @@ export async function runLiveUpscaleJob(snapshot: WorkspaceSnapshot, job: Genera
     generatedDataUrl = outputs[0];
   }
 
+  const modelName = mode === 'precision' ? 'fal-ai/aura-sr' : 'fal-ai/clarity-upscaler';
   const assetId = createId('asset-upscale');
   const versionId = createId('version-upscale');
   const runId = createId('run-upscale');
