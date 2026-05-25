@@ -1,14 +1,17 @@
 import type { Asset, EditStep, GenerationJob, ImageVersion, ModelRun, QualityEvaluation, WorkspaceSnapshot } from '@mulen/shared';
 import { canUseSupabaseStorage, persistGeneratedImageMetadata, uploadDataUrlToSupabase } from './supabaseStorage.js';
 
-// Model routing — maps frontend modelId to actual Gemini API model name
+type PhotoDirectorProvider = 'gemini' | 'chatgpt' | 'flux_pro';
+type ProviderImageInput = { data: string; mimeType: string };
+
+// Model routing — mirrors Mulen-nano model ids for Gemini image generation
 const GEMINI_MODEL_MAP: Record<string, string> = {
-  'gemini-nano-1': 'gemini-2.5-flash-preview-image-generation',
-  'gemini-nano-2': 'gemini-2.0-flash-preview-image-generation',
-  'gemini-3-pro': 'gemini-3.0-pro-preview-image-generation',
-  'gemini-best': 'gemini-3.0-pro-preview-image-generation',
+  'gemini-flash': 'gemini-3.1-flash-image-preview',
+  'gemini-pro': 'gemini-3-pro-image-preview',
+  'gemini-3.1-flash-image-preview': 'gemini-3.1-flash-image-preview',
+  'gemini-3-pro-image-preview': 'gemini-3-pro-image-preview',
 };
-const GEMINI_IMAGE_MODEL_DEFAULT = 'gemini-2.5-flash-preview-image-generation';
+const GEMINI_IMAGE_MODEL_DEFAULT = 'gemini-3.1-flash-image-preview';
 
 function resolveGeminiImageModel(modelId?: string): string {
   if (modelId && GEMINI_MODEL_MAP[modelId]) return GEMINI_MODEL_MAP[modelId];
@@ -48,6 +51,33 @@ function createId(prefix: string) {
 
 function getGeminiApiKey() {
   return String(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '').trim();
+}
+
+function getOpenAiApiKey() {
+  return String(process.env.OPENAI_API_KEY || process.env.CHATGPT_API_KEY || '').trim();
+}
+
+function dataUrlToBlob(dataUrl: string) {
+  const [header, b64] = String(dataUrl || '').split(',');
+  const mime = header?.match(/^data:([^;]+)/)?.[1] || 'image/png';
+  const bytes = Buffer.from(b64 || '', 'base64');
+  return new Blob([bytes], { type: mime });
+}
+
+function resolvePhotoDirectorProvider(modelId?: string): { provider: PhotoDirectorProvider; preferredModel?: string } {
+  if (modelId === 'openai-image') return { provider: 'chatgpt' };
+  if (modelId === 'flux-pro') return { provider: 'flux_pro' };
+  if (modelId === 'gemini-pro' || modelId === 'gemini-3-pro-image-preview') {
+    return { provider: 'gemini', preferredModel: 'gemini-3-pro-image-preview' };
+  }
+  return { provider: 'gemini', preferredModel: 'gemini-3.1-flash-image-preview' };
+}
+
+function mapPhotoDirectorAspectRatio(value?: unknown): string {
+  const normalized = String(value || 'square').toLowerCase();
+  if (normalized === 'portrait' || normalized === '3:4') return '3:4';
+  if (normalized === 'landscape' || normalized === '4:3') return '4:3';
+  return '1:1';
 }
 
 function dataUrlToInlinePart(dataUrl: string) {
@@ -99,6 +129,187 @@ async function callGeminiImage(request: Record<string, unknown>, apiKey: string,
   }
 
   return data;
+}
+
+async function generateGeminiProviderImage(params: {
+  images: ProviderImageInput[];
+  prompt: string;
+  aspectRatio: string;
+  useGrounding?: boolean;
+  preferredModel?: string;
+}) {
+  const apiKey = getGeminiApiKey();
+  if (!apiKey) throw new Error('Gemini API key is not configured.');
+
+  const parts: Array<Record<string, unknown>> = params.images.map((image) => dataUrlToInlinePart(image.data));
+  parts.push({ text: params.prompt });
+
+  const request: Record<string, unknown> = {
+    contents: [{ parts }],
+    generationConfig: {
+      responseModalities: ['IMAGE'],
+      imageConfig: { aspectRatio: params.aspectRatio },
+    },
+    safetySettings: [
+      { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_ONLY_HIGH' },
+      { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_ONLY_HIGH' },
+      { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_ONLY_HIGH' },
+      { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_ONLY_HIGH' },
+    ],
+  };
+
+  if (params.useGrounding) {
+    request.tools = [{ googleSearch: {} }];
+  }
+
+  const preferred = params.preferredModel === 'gemini-3-pro-image-preview' ? 'gemini-pro' : 'gemini-flash';
+  const data = await callGeminiImage(request, apiKey, preferred);
+  const imageBase64 = extractGeminiImage(data);
+  if (!imageBase64) {
+    const fallbackText = extractGeminiText(data);
+    throw new Error(fallbackText || 'Gemini did not return an image.');
+  }
+  return {
+    imageBase64,
+    modelId: resolveGeminiImageModel(preferred),
+    provider: 'gemini' as const,
+  };
+}
+
+function shouldFallbackOpenAI(message: string) {
+  const normalized = String(message || '').toLowerCase();
+  return (
+    normalized.includes('must be verified') ||
+    normalized.includes('organization must be verified') ||
+    normalized.includes('model_not_found') ||
+    normalized.includes('does not exist') ||
+    normalized.includes('not available') ||
+    normalized.includes('access') ||
+    normalized.includes('permission') ||
+    normalized.includes('unsupported_model')
+  );
+}
+
+async function generateOpenAIProviderImage(params: {
+  images: ProviderImageInput[];
+  prompt: string;
+  aspectRatio: string;
+}) {
+  const apiKey = getOpenAiApiKey();
+  if (!apiKey) throw new Error('OpenAI API key is not configured.');
+
+  const models = ['gpt-image-2', 'chatgpt-image-latest', 'gpt-image-1.5'];
+  const size =
+    params.aspectRatio === '3:4'
+      ? '1024x1536'
+      : params.aspectRatio === '4:3'
+        ? '1536x1024'
+        : '1024x1024';
+  const hasInputImage = params.images.length > 0;
+  const endpoint = `https://api.openai.com/v1/images/${hasInputImage ? 'edits' : 'generations'}`;
+
+  for (let index = 0; index < models.length; index += 1) {
+    const model = models[index];
+    const response = await fetch(
+      endpoint,
+      hasInputImage
+        ? {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${apiKey}`,
+            },
+            body: (() => {
+              const form = new FormData();
+              form.set('model', model);
+              form.set('prompt', params.prompt);
+              form.set('n', '1');
+              form.set('size', size);
+              form.set('quality', 'high');
+              const first = params.images[0];
+              const blob = dataUrlToBlob(first.data);
+              const ext = (first.mimeType || blob.type || 'image/png').split('/')[1] || 'png';
+              form.set('image', blob, `input.${ext}`);
+              return form;
+            })(),
+          }
+        : {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify({
+              model,
+              prompt: params.prompt,
+              n: 1,
+              size,
+              quality: 'high',
+            }),
+          },
+    );
+
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const message = data?.error?.message || response.statusText || 'OpenAI API error';
+      if (index < models.length - 1 && shouldFallbackOpenAI(message)) continue;
+      throw new Error(message);
+    }
+
+    const imageB64 = data?.data?.[0]?.b64_json || data?.data?.[0]?.b64;
+    if (!imageB64) throw new Error('No image data returned from OpenAI image API.');
+    return {
+      imageBase64: `data:image/png;base64,${imageB64}`,
+      modelId: model,
+      provider: 'chatgpt' as const,
+    };
+  }
+
+  throw new Error('OpenAI image generation failed for all fallback models.');
+}
+
+async function generateFluxProProviderImage(params: {
+  images: ProviderImageInput[];
+  prompt: string;
+  aspectRatio: string;
+}) {
+  const input: Record<string, unknown> = {
+    prompt: params.prompt,
+    aspect_ratio: params.aspectRatio,
+    output_format: 'jpeg',
+    num_images: 1,
+    safety_tolerance: 5,
+    enable_safety_checker: false,
+    raw: false,
+  };
+
+  if (params.images.length > 0) {
+    input.image_url = params.images[0].data;
+    input.image_prompt_strength = 0.1;
+  }
+
+  const outputs = await runFalModelQueued('fal-ai/flux-pro/v1.1-ultra', input);
+  if (!outputs[0]) throw new Error('FLUX Pro did not return any images.');
+  return {
+    imageBase64: outputs[0],
+    modelId: 'flux-pro-v1.1-ultra',
+    provider: 'flux_pro' as const,
+  };
+}
+
+async function generatePhotoDirectorProviderImage(params: {
+  provider: PhotoDirectorProvider;
+  images: ProviderImageInput[];
+  prompt: string;
+  aspectRatio: string;
+  preferredModel?: string;
+}) {
+  if (params.provider === 'chatgpt') {
+    return generateOpenAIProviderImage(params);
+  }
+  if (params.provider === 'flux_pro') {
+    return generateFluxProProviderImage(params);
+  }
+  return generateGeminiProviderImage(params);
 }
 
 function extractGeminiText(data: any) {
@@ -327,7 +538,7 @@ function nextPhotoEditLabel(snapshot: WorkspaceSnapshot, outputCount: number, in
 }
 
 export function canRunLivePhotoDirector() {
-  return Boolean(getGeminiApiKey());
+  return Boolean(getGeminiApiKey()) || Boolean(getOpenAiApiKey()) || Boolean(getFalKey());
 }
 
 export function canRunPromptEnhancer() {
@@ -363,32 +574,46 @@ function isMockAsset(asset: Asset | undefined): boolean {
 }
 
 function composeTextToImagePrompt(instruction: string, index: number, outputCount: number): string {
-  const variationHint = outputCount > 1 ? ` Create variation ${index + 1} with a slightly different composition or angle.` : '';
-  return `${instruction}. High quality, professional photography, photorealistic, 8K resolution.${variationHint}`;
+  const cleanInstruction = instruction.trim() || 'a beautiful professional product photograph';
+  const variationHint =
+    outputCount > 1
+      ? ` Variation ${index + 1}: keep the same core request, but explore a different composition or moment.`
+      : '';
+
+  return `${cleanInstruction}${variationHint}`.trim();
 }
 
 export async function runLivePhotoDirectorJob(snapshot: WorkspaceSnapshot, job: GenerationJob): Promise<WorkspaceSnapshot> {
-  const apiKey = getGeminiApiKey();
-  if (!apiKey) {
-    throw new Error('Gemini API key is not configured.');
-  }
-
   const input = (job.input ?? {}) as Record<string, unknown>;
   const outputCount = Math.max(1, Math.min(Number(input.outputCount ?? 1), 4));
-  const sourceVersion =
-    snapshot.versions.find((version) => version.id === String(input.sourceVersionId || '')) ??
-    snapshot.versions.find((version) => version.id === snapshot.project.activeVersionId) ??
-    snapshot.versions[0];
-  const sourceAsset = snapshot.assets.find((asset) => asset.id === sourceVersion?.assetId) ?? snapshot.assets[0];
-  const referenceAssets = collectReferenceAssets(snapshot);
+  const useSourceImage = Boolean(input.useSourceImage);
+  const useReferenceImages = Boolean(input.useReferenceImages);
+  const providerConfig = resolvePhotoDirectorProvider(String(input.modelId || ''));
+  if (
+    (providerConfig.provider === 'gemini' && !getGeminiApiKey()) ||
+    (providerConfig.provider === 'chatgpt' && !getOpenAiApiKey()) ||
+    (providerConfig.provider === 'flux_pro' && !getFalKey())
+  ) {
+    throw new Error(`Provider key is not configured for ${providerConfig.provider}.`);
+  }
+  const sourceVersion = useSourceImage
+    ? (
+        snapshot.versions.find((version) => version.id === String(input.sourceVersionId || '')) ??
+        snapshot.versions.find((version) => version.id === snapshot.project.activeVersionId) ??
+        snapshot.versions[0]
+      )
+    : undefined;
+  const sourceAsset = useSourceImage
+    ? (snapshot.assets.find((asset) => asset.id === sourceVersion?.assetId) ?? snapshot.assets[0])
+    : undefined;
+  const referenceAssets = useReferenceImages ? collectReferenceAssets(snapshot) : [];
   const createdAt = new Date().toISOString();
-
   // Detect if user has a real uploaded image or only mock placeholder
-  const hasMockSource = isMockAsset(sourceAsset);
+  const hasMockSource = !useSourceImage || isMockAsset(sourceAsset);
   const hasRealReferenceImages = referenceAssets.some((a) => !isMockAsset(a));
 
   // Only require valid URL when we actually need to use the source image
-  if (!hasMockSource && !sourceAsset?.url?.startsWith('data:') && !sourceAsset?.url?.startsWith('https://')) {
+  if (useSourceImage && !hasMockSource && !sourceAsset?.url?.startsWith('data:') && !sourceAsset?.url?.startsWith('https://')) {
     throw new Error('Source asset is missing a usable image URL or data URL.');
   }
 
@@ -400,63 +625,37 @@ export async function runLivePhotoDirectorJob(snapshot: WorkspaceSnapshot, job: 
   const outputVersionIds: string[] = [];
 
   for (let index = 0; index < outputCount; index += 1) {
-    const parts: Array<Record<string, unknown>> = [];
+    const providerImages: ProviderImageInput[] = [];
 
     // Only include source image if it's a real user-uploaded image (not mock placeholder)
-    if (!hasMockSource) {
+    if (useSourceImage && !hasMockSource && sourceAsset) {
       const sourceDataUrl = await assetUrlToDataUrl(sourceAsset.url, sourceAsset.mimeType);
-      parts.push(dataUrlToInlinePart(sourceDataUrl));
+      providerImages.push({ data: sourceDataUrl, mimeType: sourceAsset.mimeType || 'image/png' });
     }
 
     // Include real reference images (not mock ones)
     for (const referenceAsset of referenceAssets) {
       if (isMockAsset(referenceAsset)) continue;
       const referenceDataUrl = await assetUrlToDataUrl(referenceAsset.url, referenceAsset.mimeType);
-      parts.push(dataUrlToInlinePart(referenceDataUrl));
+      providerImages.push({ data: referenceDataUrl, mimeType: referenceAsset.mimeType || 'image/png' });
     }
 
     // Choose prompt strategy: if no real images, use clean text-to-image prompt; otherwise use photo-director editing prompt
     const instruction = String(input.instruction || '').trim();
-    const useTextToImage = hasMockSource && !hasRealReferenceImages;
+    const useTextToImage = !useSourceImage && !hasRealReferenceImages;
     const prompt = useTextToImage
       ? composeTextToImagePrompt(instruction || 'a beautiful professional product photograph', index, outputCount)
       : composePhotoDirectorPrompt(input, snapshot, index);
-    parts.push({ text: prompt });
-
-    // Map aspect ratio to Gemini imageConfig format
-    const aspectRatioMap: Record<string, string> = {
-      square: '1:1',
-      portrait: '3:4',
-      landscape: '4:3',
-      original: '1:1',
-    };
-    const aspectRatioKey = String(input.aspectRatio || 'square');
-    const geminiAspectRatio = aspectRatioMap[aspectRatioKey] || '1:1';
-
-    const response = await callGeminiImage(
-      {
-        contents: [{ parts }],
-        generationConfig: {
-          responseModalities: ['IMAGE'],
-          imageConfig: {
-            aspectRatio: geminiAspectRatio,
-          },
-        },
-        safetySettings: [
-          { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_ONLY_HIGH' },
-          { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_ONLY_HIGH' },
-          { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_ONLY_HIGH' },
-          { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_ONLY_HIGH' },
-        ],
-      },
-      apiKey,
-      String(input.modelId || ''),
-    );
-
-    const generatedDataUrl = extractGeminiImage(response);
-    if (!generatedDataUrl) {
-      throw new Error('Gemini did not return an image.');
-    }
+    const mappedAspectRatio = mapPhotoDirectorAspectRatio(input.aspectRatio);
+    const generated = await generatePhotoDirectorProviderImage({
+      provider: providerConfig.provider,
+      images: providerImages,
+      prompt,
+      aspectRatio: mappedAspectRatio,
+      preferredModel: providerConfig.preferredModel,
+    });
+    const generatedDataUrl = generated.imageBase64;
+    const resolvedModelName = generated.modelId;
 
     const assetId = createId('asset-generated');
     const versionId = createId('version-generated');
@@ -484,11 +683,11 @@ export async function runLivePhotoDirectorJob(snapshot: WorkspaceSnapshot, job: 
           ownerKey: snapshot.project.id,
           prompt,
           storagePath: uploaded.storagePath,
-          resolution: sourceAsset.width && sourceAsset.height ? `${sourceAsset.width}x${sourceAsset.height}` : undefined,
+          resolution: sourceAsset?.width && sourceAsset?.height ? `${sourceAsset.width}x${sourceAsset.height}` : undefined,
           aspectRatio: String(input.aspectRatio ?? 'original'),
           params: {
-            provider: 'gemini',
-            model: GEMINI_IMAGE_MODEL,
+            provider: generated.provider,
+            model: resolvedModelName,
             polishMode: input.polishMode ?? 'focused',
           },
         });
@@ -505,14 +704,14 @@ export async function runLivePhotoDirectorJob(snapshot: WorkspaceSnapshot, job: 
       url: persistedUrl,
       storagePath,
       mimeType: 'image/png',
-      width: sourceAsset.width,
-      height: sourceAsset.height,
+      width: sourceAsset?.width,
+      height: sourceAsset?.height,
       createdAt,
       metadata: {
         liveProvider: true,
         persistedToSupabase,
-        provider: 'gemini',
-        model: GEMINI_IMAGE_MODEL,
+        provider: generated.provider,
+        model: resolvedModelName,
         aspectRatio: input.aspectRatio ?? 'original',
         polishMode: input.polishMode ?? 'focused',
       },
@@ -532,8 +731,8 @@ export async function runLivePhotoDirectorJob(snapshot: WorkspaceSnapshot, job: 
       modelRuns: [runId],
       metadata: {
         liveProvider: true,
-        provider: 'gemini',
-        model: GEMINI_IMAGE_MODEL,
+        provider: generated.provider,
+        model: resolvedModelName,
       },
     });
 
@@ -553,8 +752,8 @@ export async function runLivePhotoDirectorJob(snapshot: WorkspaceSnapshot, job: 
     runs.push({
       id: runId,
       jobId: job.id,
-      provider: 'gemini',
-      model: GEMINI_IMAGE_MODEL,
+      provider: generated.provider,
+      model: resolvedModelName,
       inputPrompt: prompt,
       inputAssetIds: [sourceVersion?.assetId, ...referenceAssets.map((asset) => asset.id)].filter(Boolean) as string[],
       outputAssetId: assetId,

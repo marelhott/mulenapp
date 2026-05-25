@@ -20,6 +20,7 @@ const app = Fastify({
 
 await app.register(cors, {
   origin: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 });
 
 type CreateJobBody = {

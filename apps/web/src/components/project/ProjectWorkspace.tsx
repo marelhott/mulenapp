@@ -74,12 +74,49 @@ type SavedPrompt = {
 };
 
 const SAVED_PROMPTS_STORAGE_KEY = 'mulen-saved-prompts';
+const SELECTED_IMAGE_MODEL_STORAGE_KEY = 'mulen-selected-image-model';
 
 const MOCK_GENERATED_IMAGES = [
   'https://images.unsplash.com/photo-1511499767150-a48a237f0083?auto=format&fit=crop&w=1200&q=80',
   'https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=1200&q=80',
   'https://images.unsplash.com/photo-1491553895911-0055eca6402d?auto=format&fit=crop&w=1200&q=80',
 ];
+
+function filterDeletedEntities(
+  snapshot: WorkspaceSnapshot,
+  deletedVersionIds: Set<string>,
+  deletedJobIds: Set<string>,
+): WorkspaceSnapshot {
+  if (deletedVersionIds.size === 0 && deletedJobIds.size === 0) return snapshot;
+
+  const jobs = snapshot.jobs
+    .filter((job) => !deletedJobIds.has(job.id))
+    .map((job) => ({
+      ...job,
+      outputVersionIds: job.outputVersionIds.filter((versionId) => !deletedVersionIds.has(versionId)),
+    }));
+
+  const versions = snapshot.versions.filter((version) => !deletedVersionIds.has(version.id));
+  const assetIdsInUse = new Set(versions.map((version) => version.assetId));
+  const assets = snapshot.assets.filter((asset) => !assetIdsInUse.size || asset.kind !== 'generated' || assetIdsInUse.has(asset.id));
+  const nextActiveVersionId =
+    deletedVersionIds.has(snapshot.project.activeVersionId)
+      ? (versions.find((version) => version.module === 'photo-director')?.id ??
+        versions[0]?.id ??
+        snapshot.project.activeVersionId)
+      : snapshot.project.activeVersionId;
+
+  return {
+    ...snapshot,
+    jobs,
+    versions,
+    assets,
+    project: {
+      ...snapshot.project,
+      activeVersionId: nextActiveVersionId,
+    },
+  };
+}
 
 function createWorkspaceState(snapshot: WorkspaceSnapshot): WorkspaceState {
   return {
@@ -163,14 +200,25 @@ function formatAspectRatioLabel(value?: unknown) {
   }
 }
 
+function isMockLikeAsset(asset: Asset | undefined) {
+  if (!asset) return true;
+  const url = asset.url || '';
+  const path = asset.storagePath || '';
+  return (
+    url.includes('unsplash.com') ||
+    url.includes('images.unsplash') ||
+    path.startsWith('mock/') ||
+    path.includes('/mock/')
+  );
+}
+
 function formatModelBadge(model?: string) {
-  if (!model) return 'Nano 1';
-  if (model.includes('gemini-nano-1') || model.includes('2.5-flash')) return 'Nano 1';
-  if (model.includes('gemini-nano-2') || model.includes('2.0-flash')) return 'Nano 2';
-  if (model.includes('gemini-3-pro') || model.includes('3.0-pro')) return 'Gemini 3 Pro';
-  if (model.includes('gemini-best')) return 'Best';
-  if (model.includes('gemini')) return 'Nano 1';
-  if (model.includes('openai')) return 'gpt image';
+  if (!model) return 'Nano 2';
+  if (model.includes('gemini-3.1-flash-image-preview') || model.includes('gemini-flash')) return 'Nano 2';
+  if (model.includes('gemini-3-pro-image-preview') || model.includes('gemini-pro')) return 'Nano Pro';
+  if (model.includes('gpt-image') || model.includes('openai')) return 'GPT Img 2';
+  if (model.includes('flux')) return 'Flux Pro';
+  if (model.includes('gemini')) return 'Nano 2';
   return model.replace(/-/g, ' ');
 }
 
@@ -206,27 +254,6 @@ function MainCanvas(props: {
   const [zoomedVersionId, setZoomedVersionId] = useState<string | null>(null);
   // Feed layout: 'row' (grouped with headers) | 'grid' (flat masonry)
   const [feedLayout, setFeedLayout] = useState<'row' | 'grid'>('row');
-  // Selected version IDs for batch delete
-  const [selectedVersionIds, setSelectedVersionIds] = useState<Set<string>>(new Set());
-
-  const toggleSelectVersion = (versionId: string) => {
-    setSelectedVersionIds(prev => {
-      const next = new Set(prev);
-      if (next.has(versionId)) next.delete(versionId); else next.add(versionId);
-      return next;
-    });
-  };
-  const selectAllInRow = (row: { cards: Array<{ versionId: string }> }) => {
-    const ids = row.cards.map(c => c.versionId).filter(Boolean);
-    setSelectedVersionIds(prev => {
-      const allSelected = ids.every(id => prev.has(id));
-      const next = new Set(prev);
-      if (allSelected) { ids.forEach(id => next.delete(id)); }
-      else { ids.forEach(id => next.add(id)); }
-      return next;
-    });
-  };
-  const clearSelection = () => setSelectedVersionIds(new Set());
 
   // Detail modal zoom state
   const [modalZoom, setModalZoom] = useState(1);
@@ -398,7 +425,7 @@ function MainCanvas(props: {
           prompt,
           createdAt: job.createdAt,
           aspectRatio: formatAspectRatioLabel(firstVersion?.metadata?.aspectRatio),
-          modelLabel: formatModelBadge(firstRun?.model),
+          modelLabel: formatModelBadge(typeof job.input.modelId === 'string' ? job.input.modelId : firstRun?.model),
           speedLabel: formatSpeedBadge(polishMode),
           cards,
         };
@@ -419,7 +446,7 @@ function MainCanvas(props: {
         prompt: props.snapshot.photoDirectorInstruction || 'Generating...',
         createdAt: new Date().toISOString(),
         aspectRatio: formatAspectRatioLabel(props.snapshot.photoDirectorAspectRatio),
-        modelLabel: 'google nano banana 2',
+        modelLabel: formatModelBadge(props.snapshot.modelRuns[0]?.model ?? 'gemini-3.1-flash-image-preview'),
         speedLabel: formatSpeedBadge(props.snapshot.photoDirectorPolishMode),
         cards: Array.from({ length: props.generatingCount ?? 1 }, (_, index) => ({
           id: `pending-card-${index}`,
@@ -521,14 +548,13 @@ function MainCanvas(props: {
                   <div className="nano-creation-flat-grid">
                     {creationRows.flatMap(row => row.cards).map(card => {
                       const row = creationRows.find(r => r.cards.some(c => c.id === card.id))!;
-                      const isSelected = card.versionId ? selectedVersionIds.has(card.versionId) : false;
                       return (
-                        <div key={card.id} className={`nano-creation-card-wrap${isSelected ? ' is-selected' : ''}`}>
+                        <div key={card.id} className="nano-creation-card-wrap">
                           <div
                             role="button"
                             tabIndex={card.url ? 0 : -1}
                             className={card.url ? 'nano-creation-card' : 'nano-creation-card is-loading'}
-                            style={{ aspectRatio: getAspectRatioValue(row.aspectRatio) }}
+                            style={{ aspectRatio: card.url ? getAspectRatioValue(row.aspectRatio) : '1 / 1' }}
                             onClick={() => {
                               if (!card.url) return;
                               const allCards = row.cards.filter(c => c.url).map(c => ({ ...c, prompt: row.prompt, aspectRatio: row.aspectRatio, modelLabel: row.modelLabel, createdAt: row.createdAt }));
@@ -551,16 +577,17 @@ function MainCanvas(props: {
                               </div>
                             )}
                           </div>
-                          {/* Checkbox — Magnific: absolute left-2.5 top-2.5 z-30, opacity-0 group-hover/item:opacity-100 */}
                           {card.versionId ? (
                             <button
                               type="button"
-                              className={`nano-creation-card-checkbox${isSelected ? ' is-checked' : ''}`}
-                              aria-label="Vybrat obrázek"
-                              aria-pressed={isSelected}
-                              onClick={(e) => { e.stopPropagation(); toggleSelectVersion(card.versionId); }}
+                              className="nano-creation-card-delete"
+                              aria-label="Smazat obrázek"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                props.onDeleteVersion?.(card.versionId);
+                              }}
                             >
-                              {isSelected && <X size={10} />}
+                              <X size={12} />
                             </button>
                           ) : null}
                         </div>
@@ -570,8 +597,6 @@ function MainCanvas(props: {
                 ) : (
                   /* ── Row layout — Magnific: grouped rows with headers ── */
                   creationRows.map((row) => {
-                    const rowVersionIds = row.cards.map(c => c.versionId).filter(Boolean);
-                    const allRowSelected = rowVersionIds.length > 0 && rowVersionIds.every(id => selectedVersionIds.has(id));
                     return (
                     <article className="nano-creation-row" key={row.id}>
                       {/* Row header — Magnific: rounded-t-xl bg-panel-6 p-3 */}
@@ -586,17 +611,17 @@ function MainCanvas(props: {
                         </div>
                         <div className="nano-creation-row-header-right">
                           <span className="nano-creation-time">{formatRelativeTimeLabel(row.createdAt)}</span>
-                          {/* Select-all checkbox — Magnific: data-cy="select-all-row-button" */}
-                          {row.id !== 'pending-generation' && rowVersionIds.length > 0 ? (
+                          {row.id !== 'pending-generation' ? (
                             <button
                               type="button"
-                              data-cy="select-all-row-button"
-                              className={`nano-creation-select-all${allRowSelected ? ' is-checked' : ''}`}
-                              aria-label="Vybrat vše v řádku"
-                              aria-pressed={allRowSelected}
-                              onClick={(e) => { e.stopPropagation(); selectAllInRow(row); }}
+                              className="nano-creation-row-delete"
+                              aria-label="Smazat řádek"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                props.onDeleteRow?.(row.id);
+                              }}
                             >
-                              {allRowSelected && <X size={10} />}
+                              <X size={14} />
                             </button>
                           ) : null}
                         </div>
@@ -604,14 +629,13 @@ function MainCanvas(props: {
                       {/* Grid — Magnific: grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3 px-3 pb-3 bg-panel-6 rounded-b-xl */}
                       <div className="nano-creation-strip">
                         {row.cards.map((card, cardIndex) => {
-                          const isSelected = card.versionId ? selectedVersionIds.has(card.versionId) : false;
                           return (
-                          <div key={card.id} className={`nano-creation-card-wrap${isSelected ? ' is-selected' : ''}`}>
+                          <div key={card.id} className="nano-creation-card-wrap">
                             <div
                               role="button"
                               tabIndex={card.url ? 0 : -1}
                               className={card.url ? 'nano-creation-card' : 'nano-creation-card is-loading'}
-                              style={{ aspectRatio: getAspectRatioValue(row.aspectRatio) }}
+                              style={{ aspectRatio: card.url ? getAspectRatioValue(row.aspectRatio) : '1 / 1' }}
                               onClick={() => {
                                 if (!card.url) return;
                                 const allCards = row.cards.filter(c => c.url).map(c => ({ ...c, prompt: row.prompt, aspectRatio: row.aspectRatio, modelLabel: row.modelLabel, createdAt: row.createdAt }));
@@ -643,17 +667,17 @@ function MainCanvas(props: {
                                 </div>
                               )}
                             </div>
-                            {/* Checkbox — Magnific: data-cy="thumbnail-checkbox", top-left, opacity-0 → opacity-100 on hover */}
                             {card.versionId ? (
                               <button
                                 type="button"
-                                data-cy="thumbnail-checkbox"
-                                className={`nano-creation-card-checkbox${isSelected ? ' is-checked' : ''}`}
-                                aria-label="Vybrat obrázek"
-                                aria-pressed={isSelected}
-                                onClick={(e) => { e.stopPropagation(); toggleSelectVersion(card.versionId); }}
+                                className="nano-creation-card-delete"
+                                aria-label="Smazat obrázek"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  props.onDeleteVersion?.(card.versionId);
+                                }}
                               >
-                                {isSelected && <X size={10} />}
+                                <X size={12} />
                               </button>
                             ) : null}
                           </div>
@@ -663,32 +687,6 @@ function MainCanvas(props: {
                     </article>
                     );
                   })
-                )}
-                {/* Batch action bar — appears when items selected */}
-                {selectedVersionIds.size > 0 && (
-                  <div className="nano-batch-action-bar">
-                    <span className="nano-batch-action-count">{selectedVersionIds.size} vybráno</span>
-                    <button
-                      type="button"
-                      className="nano-batch-action-delete"
-                      aria-label="Smazat vybrané"
-                      onClick={() => {
-                        selectedVersionIds.forEach(id => props.onDeleteVersion?.(id));
-                        clearSelection();
-                      }}
-                    >
-                      <X size={14} />
-                      <span>Smazat</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="nano-batch-action-cancel"
-                      aria-label="Zrušit výběr"
-                      onClick={clearSelection}
-                    >
-                      Zrušit
-                    </button>
-                  </div>
                 )}
                 </div>
               </section>
@@ -1217,10 +1215,10 @@ function NanoLeftSidebar(props: {
   onAspectRatioChange?: (value: 'original' | 'square' | 'portrait' | 'landscape') => void;
 }) {
   const imageModelPresets = [
-    { id: 'gemini-nano-1', title: 'Nano 1', subtitle: 'Gemini 2.5 Flash' },
-    { id: 'gemini-nano-2', title: 'Nano 2', subtitle: 'Gemini 2.0 Flash' },
-    { id: 'gemini-3-pro', title: 'Gemini 3 Pro', subtitle: 'Gemini 3.0 Pro Preview' },
-    { id: 'gemini-best', title: 'Best', subtitle: 'Nejlepší dostupný model' },
+    { id: 'gemini-flash', title: 'Nano 2', subtitle: 'Gemini 3.1 Flash' },
+    { id: 'gemini-pro', title: 'Nano Pro', subtitle: 'Gemini 3 Pro' },
+    { id: 'openai-image', title: 'GPT Img 2', subtitle: 'OpenAI' },
+    { id: 'flux-pro', title: 'Flux Pro', subtitle: 'fal.ai' },
   ];
   const referenceAssets = props.snapshot.assets.filter((asset) => asset.kind === 'reference');
   const originalAsset = props.snapshot.assets.find((asset) => asset.id === props.snapshot.project.originalAssetId);
@@ -2350,11 +2348,9 @@ export function ProjectWorkspace(props: {
   const [isSavePromptOpen, setIsSavePromptOpen] = useState(false);
   const [savedPromptDraftName, setSavedPromptDraftName] = useState('');
   const [selectedSavedPromptId, setSelectedSavedPromptId] = useState<string | null>(null);
-  const [selectedModelId, setSelectedModelId] = useState<string>('gemini-nano-1');
-
-  useEffect(() => {
-    setModel(selectedModelId).catch(console.error);
-  }, [selectedModelId]);
+  const [selectedModelId, setSelectedModelId] = useState<string>('gemini-flash');
+  const deletedVersionIdsRef = useRef<Set<string>>(new Set());
+  const deletedJobIdsRef = useRef<Set<string>>(new Set());
 
   const canGenerate = useMemo(() => {
     switch (props.activeRoute) {
@@ -2378,7 +2374,11 @@ export function ProjectWorkspace(props: {
   }, [props.activeRoute, workspace, snapshot.assets]);
 
   const syncWorkspaceFromApi = async () => {
-    const nextSnapshot = await api.getProject(workspace.project.id);
+    const nextSnapshot = filterDeletedEntities(
+      await api.getProject(workspace.project.id),
+      deletedVersionIdsRef.current,
+      deletedJobIdsRef.current,
+    );
     startTransition(() => {
       setWorkspace((current) => {
         const next = createWorkspaceState(nextSnapshot);
@@ -2430,7 +2430,7 @@ export function ProjectWorkspace(props: {
 
   useEffect(() => {
     startTransition(() => {
-      setWorkspace(createWorkspaceState(snapshot));
+      setWorkspace(createWorkspaceState(filterDeletedEntities(snapshot, deletedVersionIdsRef.current, deletedJobIdsRef.current)));
     });
   }, [snapshot]);
 
@@ -2475,6 +2475,21 @@ export function ProjectWorkspace(props: {
       // Keep UI usable even if localStorage contains invalid data.
     }
   }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const savedModelId = window.localStorage.getItem(SELECTED_IMAGE_MODEL_STORAGE_KEY);
+    if (!savedModelId) return;
+    if (savedModelId === 'gemini-flash' || savedModelId === 'gemini-pro' || savedModelId === 'openai-image' || savedModelId === 'flux-pro') {
+      setSelectedModelId(savedModelId);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(SELECTED_IMAGE_MODEL_STORAGE_KEY, selectedModelId);
+    setModel(selectedModelId).catch(console.error);
+  }, [selectedModelId]);
 
   const setActiveVersion = (versionId: string) => {
     startTransition(() => {
@@ -3188,6 +3203,12 @@ export function ProjectWorkspace(props: {
 
   const handleGenerate = async () => {
     if (props.activeRoute === 'mulen' && props.apiConfig?.features.photoDirector) {
+      const originalAsset = workspace.assets.find((asset) => asset.id === workspace.project.originalAssetId);
+      const useSourceImage = Boolean(originalAsset && originalAsset.kind === 'original' && !isMockLikeAsset(originalAsset));
+      const useReferenceImages = workspace.visualCanon.referenceAssetIds
+        .map((assetId) => workspace.assets.find((asset) => asset.id === assetId))
+        .some((asset) => asset?.kind === 'reference' && !isMockLikeAsset(asset));
+
       setIsGenerating(true);
       setWorkspaceNote('Photo Director odesila zadani do backend job systemu a ceka na novou verzi.');
 
@@ -3203,7 +3224,9 @@ export function ProjectWorkspace(props: {
           simpleLinkMode,
           advancedVariant,
           faceIdentityMode,
-          sourceVersionId: workspace.project.activeVersionId,
+          sourceVersionId: useSourceImage ? workspace.project.activeVersionId : undefined,
+          useSourceImage,
+          useReferenceImages,
           modelId: selectedModelId,
         });
 
@@ -4825,6 +4848,7 @@ export function ProjectWorkspace(props: {
   };
 
   const handleDeleteVersion = (versionId: string) => {
+    deletedVersionIdsRef.current.add(versionId);
     // Optimistic local update
     startTransition(() => {
       setWorkspace((current) => {
@@ -4852,6 +4876,9 @@ export function ProjectWorkspace(props: {
   };
 
   const handleDeleteRow = (jobId: string) => {
+    deletedJobIdsRef.current.add(jobId);
+    const job = workspace.jobs.find((item) => item.id === jobId);
+    job?.outputVersionIds.forEach((versionId) => deletedVersionIdsRef.current.add(versionId));
     // Optimistic local update
     startTransition(() => {
       setWorkspace((current) => {

@@ -64,6 +64,8 @@ export const api = {
     advancedVariant?: 'A' | 'B' | 'C';
     faceIdentityMode?: boolean;
     sourceVersionId?: string;
+    useSourceImage?: boolean;
+    useReferenceImages?: boolean;
     modelId?: string;
   }) {
     return requestJson<GenerationJob>('/jobs', {
