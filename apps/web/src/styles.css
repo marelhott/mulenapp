@@ -4308,91 +4308,147 @@ select,
   padding: 0 4px;
 }
 
+/* ── Magnific feed layout ──────────────────────────────────────── */
 .nano-creations-feed {
-  display: grid;
-  gap: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   padding: 2px 0 10px;
 }
 
+/* Row = header (rounded-t) + grid (rounded-b) grouped together */
 .nano-creation-row {
-  border: 1px solid rgba(50, 56, 50, 0.06);
-  border-radius: 10px;
-  background: #f7f7f4;
-  box-shadow: 0 8px 24px rgba(33, 35, 27, 0.03);
-  padding: 14px 14px 16px;
+  /* no border/shadow — Magnific uses bg-panel-6 rounded-xl */
 }
 
+/* Header block — Magnific: rounded-t-xl bg-panel-6 p-3 */
 .nano-creation-row-header {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 14px;
-  margin-bottom: 10px;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 12px 0 12px;
+  background: #fcfcfc;
+  border-radius: 12px 12px 0 0;
+}
+
+.app-shell-dark .nano-creation-row-header {
+  background: #1e1e1e;
+}
+
+/* left part: prompt + chips */
+.nano-creation-row-header-left {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* right part: time */
+.nano-creation-row-header-right {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-left: 1px solid rgba(16,16,16,0.1);
+  padding-left: 8px;
+  margin-left: auto;
+}
+
+.app-shell-dark .nano-creation-row-header-right {
+  border-left-color: rgba(255,255,255,0.08);
 }
 
 .nano-creation-prompt {
   margin: 0;
   min-width: 0;
-  color: #4c514b;
-  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #424242;
+  font-size: 11px;
   line-height: 1.4;
-  letter-spacing: -0.01em;
+}
+
+.app-shell-dark .nano-creation-prompt {
+  color: rgba(255,255,255,0.65);
 }
 
 .nano-creation-meta {
-  flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 8px;
-  color: #6a6f69;
+  gap: 4px;
+  flex-wrap: wrap;
 }
 
+/* Magnific chip: h-4.5 bg-surface-2 rounded px-1 text-2xs font-medium lowercase */
 .nano-creation-chip {
-  min-height: 22px;
-  border-radius: 6px;
-  background: #ecece8;
-  color: #474b46;
   display: inline-flex;
   align-items: center;
-  padding: 0 7px;
-  font-size: 8px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
+  justify-content: center;
   white-space: nowrap;
+  height: 18px;
+  border-radius: 4px;
+  background: #ececec;
+  color: #1a1a1a;
+  padding: 0 4px;
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: lowercase;
+  letter-spacing: 0;
 }
 
-.nano-creation-meta-divider {
-  width: 1px;
-  height: 18px;
-  background: rgba(88, 93, 87, 0.18);
+.app-shell-dark .nano-creation-chip {
+  background: rgba(255,255,255,0.1);
+  color: rgba(255,255,255,0.7);
 }
 
 .nano-creation-time {
-  font-size: 9px;
-  color: #666b65;
+  font-size: 11px;
+  color: #424242;
   white-space: nowrap;
 }
 
-.nano-creation-strip {
-  display: flex;
-  gap: 12px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  padding-bottom: 2px;
-  scrollbar-width: thin;
+.app-shell-dark .nano-creation-time {
+  color: rgba(255,255,255,0.55);
 }
 
+/* Grid block — Magnific: grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3 px-3 pb-3 bg-panel-6 rounded-b-xl */
+.nano-creation-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+  padding: 12px;
+  background: #fcfcfc;
+  border-radius: 0 0 12px 12px;
+}
+
+.app-shell-dark .nano-creation-strip {
+  background: #1e1e1e;
+}
+
+/* Card wrap — Magnific: group relative */
+.nano-creation-card-wrap {
+  position: relative;
+}
+
+/* Card inner — Magnific: group/item relative flex h-full flex-col overflow-hidden rounded-xl bg-surface-1 cursor-pointer */
 .nano-creation-card {
   position: relative;
-  flex: 0 0 210px;
-  width: 210px;
-  aspect-ratio: 3 / 4;
-  border: 1px solid rgba(50, 56, 50, 0.08);
-  border-radius: 10px;
+  display: block;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border: 0;
+  border-radius: 12px;
   overflow: hidden;
-  background: #ecece6;
+  background: #f5f5f5;
   padding: 0;
+  cursor: pointer;
   box-shadow: none;
+}
+
+.app-shell-dark .nano-creation-card {
+  background: #2a2a2a;
 }
 
 .nano-creation-card img {
@@ -4400,40 +4456,164 @@ select,
   width: 100%;
   height: 100%;
   object-fit: cover;
+  border-radius: 12px;
+  backface-visibility: hidden;
+  transform-style: preserve-3d;
+  transition: transform 0.3s ease-out, opacity 0.3s ease-out;
 }
 
+/* Loading/pending card */
 .nano-creation-card.is-loading {
-  background: linear-gradient(180deg, #f0f0ea 0%, #e8e8e1 100%);
+  background: #f5f5f5;
+  cursor: default;
 }
 
+.app-shell-dark .nano-creation-card.is-loading {
+  background: #2a2a2a;
+}
+
+/* Loading overlay — Magnific: absolute inset-0 z-40 flex flex-col items-center justify-center bg-surface-0/95 */
 .nano-creation-card-loading {
-  display: grid;
-  place-items: center;
-  width: 100%;
-  height: 100%;
-  padding: 18px;
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.96);
 }
 
-.nano-creation-card-badge {
+.app-shell-dark .nano-creation-card-loading {
+  background: rgba(28, 28, 28, 0.96);
+}
+
+/* Pulsing icon inside loading */
+.nano-creation-card-loading-icon {
+  width: 20px;
+  height: 20px;
+  color: #424242;
+  opacity: 0.6;
+  animation: mag-pulse 1.5s ease-in-out infinite;
+}
+
+.app-shell-dark .nano-creation-card-loading-icon {
+  color: rgba(255,255,255,0.6);
+}
+
+@keyframes mag-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.85; }
+}
+
+.nano-creation-card-loading-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: #1a1a1a;
+  margin: 0;
+}
+
+.app-shell-dark .nano-creation-card-loading-label {
+  color: rgba(255,255,255,0.75);
+}
+
+/* Progress bar — Magnific: h-1.5 w-full max-w-[180px] overflow-hidden rounded-full bg-surface-3 */
+.nano-creation-progress-track {
+  width: 100%;
+  max-width: 180px;
+  height: 6px;
+  border-radius: 99px;
+  background: #e3e3e3;
+  overflow: hidden;
+}
+
+.app-shell-dark .nano-creation-progress-track {
+  background: rgba(255,255,255,0.12);
+}
+
+.nano-creation-progress-fill {
+  height: 100%;
+  border-radius: 99px;
+  background: #4f69f2;
+  width: 0%;
+  animation: mag-progress 18s cubic-bezier(0.1, 0, 0.3, 1) forwards;
+}
+
+@keyframes mag-progress {
+  0%   { width: 0%; }
+  20%  { width: 35%; }
+  50%  { width: 62%; }
+  80%  { width: 82%; }
+  100% { width: 89%; }
+}
+
+/* Bottom-left badges — Magnific: absolute bottom-2.5 left-2.5 flex items-end gap-1.5 */
+.nano-creation-card-badges {
   position: absolute;
   left: 10px;
   bottom: 10px;
-  min-height: 24px;
-  border-radius: 6px;
-  background: rgba(34, 37, 34, 0.68);
-  color: #fbfbf8;
+  z-index: 20;
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  pointer-events: none;
+}
+
+/* Resolution badge — Magnific: bg-neutral-850/25 rounded-full backdrop-blur px-1.5 py-1; fades on hover */
+.nano-creation-card-badge {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 0 8px;
-  backdrop-filter: blur(8px);
+  gap: 4px;
+  padding: 4px 6px;
+  border-radius: 99px;
+  background: rgba(20, 20, 20, 0.25);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  color: #ffffff;
+  transition: opacity 0.3s ease;
+}
+
+.nano-creation-card:hover .nano-creation-card-badge {
+  opacity: 0;
 }
 
 .nano-creation-card-badge strong {
-  font-size: 8px;
-  font-weight: 700;
-  letter-spacing: 0;
-  color: inherit;
+  font-size: 10px;
+  font-weight: 500;
+  color: #ffffff;
+  letter-spacing: 0.2px;
+  line-height: 1;
+}
+
+/* Delete button (X) — Magnific-style top-right */
+.nano-creation-card-delete {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 99px;
+  border: 0;
+  background: rgba(20, 20, 20, 0.35);
+  backdrop-filter: blur(8px);
+  color: #ffffff;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s, background 0.2s;
+  z-index: 30;
+}
+
+.nano-creation-card-wrap:hover .nano-creation-card-delete {
+  opacity: 1;
+}
+
+.nano-creation-card-delete:hover {
+  background: rgba(200, 40, 40, 0.75);
 }
 
 .nano-main-empty-state {
@@ -4442,6 +4622,11 @@ select,
   border: 1px dashed rgba(76, 81, 75, 0.18);
   border-radius: 10px;
   background: #ffffff;
+}
+
+.app-shell-dark .nano-main-empty-state {
+  background: transparent;
+  border-color: rgba(255,255,255,0.08);
 }
 
 .nano-mini-actions,
@@ -4759,4 +4944,400 @@ select,
 
 .app-shell-dark .nano-upscaler-precision-desc {
   color: rgba(255, 255, 255, 0.35);
+}
+
+/* ── Delete button for row header (row-level X) ──────────────── */
+.nano-creation-row-delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 0;
+  background: transparent;
+  border-radius: 4px;
+  color: rgba(26, 26, 26, 0.35);
+  cursor: pointer;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
+  margin-left: 4px;
+}
+
+.nano-creation-row:hover .nano-creation-row-delete {
+  opacity: 1;
+}
+
+.nano-creation-row-delete:hover {
+  background: rgba(200, 40, 40, 0.08);
+  color: #c82828;
+}
+
+.app-shell-dark .nano-creation-row-delete {
+  color: rgba(255, 255, 255, 0.35);
+}
+
+/* ── Magnific Detail Modal ────────────────────────────────────── */
+.mag-modal-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 56px;
+  background: rgba(0,0,0,0.7);
+  z-index: 50;
+}
+
+.mag-modal {
+  position: relative;
+  display: flex;
+  flex-direction: row;
+  width: 100%;
+  max-width: 1100px;
+  max-height: 90vh;
+  height: 100%;
+  background: #ffffff;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.app-shell-dark .mag-modal {
+  background: #1a1a1a;
+}
+
+/* Close button — absolute -right-12 top-0 */
+.mag-modal-close {
+  position: absolute;
+  right: -48px;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 99px;
+  background: transparent;
+  color: #ffffff;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.mag-modal-close:hover {
+  background: rgba(255,255,255,0.15);
+}
+
+/* Prev/next arrows */
+.mag-modal-prev,
+.mag-modal-next {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #1a1a1a;
+  cursor: pointer;
+  z-index: 10;
+  transition: background 0.15s;
+}
+
+.app-shell-dark .mag-modal-prev,
+.app-shell-dark .mag-modal-next {
+  background: #2a2a2a;
+  color: rgba(255,255,255,0.8);
+}
+
+.mag-modal-prev { left: -40px; }
+.mag-modal-next { right: -40px; }
+
+.mag-modal-prev:disabled,
+.mag-modal-next:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.mag-modal-prev:not(:disabled):hover,
+.mag-modal-next:not(:disabled):hover {
+  background: #f0f0f0;
+}
+
+/* Left side: image */
+.mag-modal-image-side {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f5f5f5;
+  padding: 12px;
+  overflow: hidden;
+}
+
+.app-shell-dark .mag-modal-image-side {
+  background: #111;
+}
+
+.mag-modal-image-side img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 8px;
+}
+
+/* Right sidebar */
+.mag-modal-sidebar {
+  width: 320px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 16px;
+  background: #f5f5f5;
+  overflow-y: auto;
+  border-radius: 0 12px 12px 0;
+}
+
+.app-shell-dark .mag-modal-sidebar {
+  background: #222;
+}
+
+/* Tab switcher — Details / Comments */
+.mag-modal-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 10px;
+  background: rgba(16,16,16,0.06);
+}
+
+.app-shell-dark .mag-modal-tabs {
+  background: rgba(255,255,255,0.06);
+}
+
+.mag-modal-tab {
+  flex: 1;
+  height: 24px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  font-size: 11px;
+  font-weight: 500;
+  color: rgba(16,16,16,0.45);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.app-shell-dark .mag-modal-tab {
+  color: rgba(255,255,255,0.35);
+}
+
+.mag-modal-tab.active {
+  background: #ffffff;
+  color: #1a1a1a;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.app-shell-dark .mag-modal-tab.active {
+  background: rgba(255,255,255,0.12);
+  color: rgba(255,255,255,0.9);
+}
+
+/* Action row: trash | divider | heart | save | download */
+.mag-modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.mag-modal-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #424242;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.app-shell-dark .mag-modal-action-btn {
+  color: rgba(255,255,255,0.6);
+}
+
+.mag-modal-action-btn:hover {
+  background: rgba(16,16,16,0.06);
+}
+
+.mag-modal-action-btn.danger:hover {
+  color: #dc2626;
+}
+
+.mag-modal-divider {
+  width: 1px;
+  height: 16px;
+  background: rgba(16,16,16,0.1);
+  margin: 0 2px;
+}
+
+.app-shell-dark .mag-modal-divider {
+  background: rgba(255,255,255,0.1);
+}
+
+/* Download button */
+.mag-modal-download-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  height: 32px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 8px;
+  background: #f0f0f0;
+  color: #1a1a1a;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 0.15s;
+}
+
+.app-shell-dark .mag-modal-download-btn {
+  background: rgba(255,255,255,0.1);
+  color: rgba(255,255,255,0.85);
+}
+
+.mag-modal-download-btn:hover {
+  background: #e3e3e3;
+}
+
+/* Detail section: Prompt / Settings */
+.mag-modal-section-title {
+  font-size: 11px;
+  font-weight: 500;
+  color: #1a1a1a;
+  margin: 0 0 4px;
+}
+
+.app-shell-dark .mag-modal-section-title {
+  color: rgba(255,255,255,0.85);
+}
+
+.mag-modal-prompt-text {
+  font-size: 11px;
+  line-height: 1.55;
+  color: #616161;
+  margin: 0;
+  white-space: pre-line;
+  cursor: text;
+  user-select: text;
+}
+
+.app-shell-dark .mag-modal-prompt-text {
+  color: rgba(255,255,255,0.45);
+}
+
+.mag-modal-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.mag-modal-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 4px;
+  border: 1px solid rgba(16,16,16,0.15);
+  font-size: 10px;
+  font-weight: 500;
+  color: #1a1a1a;
+}
+
+.app-shell-dark .mag-modal-badge {
+  border-color: rgba(255,255,255,0.15);
+  color: rgba(255,255,255,0.75);
+}
+
+/* Action list buttons: Use image / Edit image / ... */
+.mag-modal-cta-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: auto;
+}
+
+.mag-modal-cta-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 32px;
+  padding: 0 16px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.mag-modal-cta-btn.primary {
+  border: 0;
+  background: #222222;
+  color: #ffffff;
+}
+
+.mag-modal-cta-btn.primary:hover {
+  background: #333;
+}
+
+.app-shell-dark .mag-modal-cta-btn.primary {
+  background: rgba(255,255,255,0.12);
+  color: rgba(255,255,255,0.9);
+}
+
+.mag-modal-cta-btn.outline {
+  border: 1px solid rgba(16,16,16,0.08);
+  background: transparent;
+  color: #1a1a1a;
+}
+
+.mag-modal-cta-btn.outline:hover {
+  border-color: rgba(16,16,16,0.2);
+  background: rgba(16,16,16,0.04);
+}
+
+.app-shell-dark .mag-modal-cta-btn.outline {
+  border-color: rgba(255,255,255,0.1);
+  color: rgba(255,255,255,0.75);
+}
+
+.app-shell-dark .mag-modal-cta-btn.outline:hover {
+  background: rgba(255,255,255,0.05);
+}
+
+/* Timestamp */
+.mag-modal-timestamp {
+  font-size: 10px;
+  color: #9e9e9e;
+  margin: 0;
+}
+
+.app-shell-dark .mag-modal-timestamp {
+  color: rgba(255,255,255,0.3);
 }

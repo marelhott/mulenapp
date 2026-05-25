@@ -176,6 +176,19 @@ function formatSpeedBadge(polishMode?: unknown) {
   return 'thinking fast';
 }
 
+/** Maps the aspect ratio label to a CSS aspect-ratio value for card sizing */
+function getAspectRatioValue(label?: string): string {
+  if (!label) return '1 / 1';
+  const lower = label.toLowerCase();
+  if (lower === 'portrait' || lower === '3:4') return '3 / 4';
+  if (lower === 'landscape' || lower === '4:3') return '4 / 3';
+  if (lower === 'square' || lower === '1:1') return '1 / 1';
+  // Try to parse "W:H" pattern
+  const match = lower.match(/^(\d+):(\d+)$/);
+  if (match) return `${match[1]} / ${match[2]}`;
+  return '1 / 1';
+}
+
 function MainCanvas(props: {
   snapshot: WorkspaceState;
   activeRoute: NanoRoute;
@@ -188,6 +201,12 @@ function MainCanvas(props: {
   onDeleteRow?: (jobId: string) => void;
 }) {
   const [zoomedVersionId, setZoomedVersionId] = useState<string | null>(null);
+  // Detail modal state — Magnific-style full overlay
+  const [detailModal, setDetailModal] = useState<{
+    cards: Array<{ id: string; versionId: string; url: string; label?: string; resolution: string; prompt: string; aspectRatio: string; modelLabel: string; createdAt: string }>;
+    index: number;
+  } | null>(null);
+
   // Session-local generated images (cleared on refresh automatically because state is not persisted)
   const [sessionImages, setSessionImages] = useState<Array<{
     id: string;
@@ -459,16 +478,19 @@ function MainCanvas(props: {
                 ) : (
                   creationRows.map((row) => (
                     <article className="nano-creation-row" key={row.id}>
-                      <header className="nano-creation-row-header">
-                        <p className="nano-creation-prompt" title={row.prompt}>
-                          {row.prompt}
-                        </p>
-                        <div className="nano-creation-meta">
-                          <span className="nano-creation-chip">{row.aspectRatio}</span>
-                          <span className="nano-creation-chip">{row.modelLabel}</span>
-                          <span className="nano-creation-chip">{row.speedLabel}</span>
-                          <span className="nano-creation-meta-divider" aria-hidden="true" />
-                          <Square size={14} />
+                      {/* Row header — Magnific: rounded-t-xl bg-panel-6 p-3 */}
+                      <div className="nano-creation-row-header">
+                        <div className="nano-creation-row-header-left">
+                          <p className="nano-creation-prompt" title={row.prompt}>
+                            {row.prompt}
+                          </p>
+                          <div className="nano-creation-meta">
+                            {row.aspectRatio && <span className="nano-creation-chip">{row.aspectRatio}</span>}
+                            {row.modelLabel && <span className="nano-creation-chip">{row.modelLabel}</span>}
+                            {row.speedLabel && <span className="nano-creation-chip">{row.speedLabel}</span>}
+                          </div>
+                        </div>
+                        <div className="nano-creation-row-header-right">
                           <span className="nano-creation-time">{formatRelativeTimeLabel(row.createdAt)}</span>
                           {row.id !== 'pending-generation' && props.onDeleteRow ? (
                             <button
@@ -481,34 +503,69 @@ function MainCanvas(props: {
                             </button>
                           ) : null}
                         </div>
-                      </header>
+                      </div>
+                      {/* Grid — Magnific: grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3 px-3 pb-3 bg-panel-6 rounded-b-xl */}
                       <div className="nano-creation-strip">
-                        {row.cards.map((card) => (
+                        {row.cards.map((card, cardIndex) => (
                           <div key={card.id} className="nano-creation-card-wrap">
-                            <button
-                              type="button"
+                            {/* Card — Magnific: group/item relative overflow-hidden rounded-xl bg-surface-1 cursor-pointer */}
+                            <div
+                              role="button"
+                              tabIndex={card.url ? 0 : -1}
                               className={card.url ? 'nano-creation-card' : 'nano-creation-card is-loading'}
+                              style={{ aspectRatio: getAspectRatioValue(row.aspectRatio) }}
                               onClick={() => {
-                                if (!card.versionId) return;
-                                props.onSelectVersion(card.versionId);
-                                setZoomedVersionId(card.versionId);
+                                if (!card.url) return;
+                                const allCards = row.cards.filter(c => c.url).map(c => ({
+                                  ...c,
+                                  prompt: row.prompt,
+                                  aspectRatio: row.aspectRatio,
+                                  modelLabel: row.modelLabel,
+                                  createdAt: row.createdAt,
+                                }));
+                                const clickedIndex = allCards.findIndex(c => c.id === card.id);
+                                setDetailModal({ cards: allCards, index: Math.max(0, clickedIndex) });
+                                if (card.versionId) props.onSelectVersion(card.versionId);
                               }}
-                              disabled={!card.url}
+                              onKeyDown={(e) => {
+                                if ((e.key === 'Enter' || e.key === ' ') && card.url) {
+                                  const allCards = row.cards.filter(c => c.url).map(c => ({
+                                    ...c,
+                                    prompt: row.prompt,
+                                    aspectRatio: row.aspectRatio,
+                                    modelLabel: row.modelLabel,
+                                    createdAt: row.createdAt,
+                                  }));
+                                  const clickedIndex = allCards.findIndex(c => c.id === card.id);
+                                  setDetailModal({ cards: allCards, index: Math.max(0, clickedIndex) });
+                                }
+                              }}
                             >
                               {card.url ? (
                                 <img src={card.url} alt={card.label || row.prompt} />
                               ) : (
+                                /* Loading overlay — Magnific: absolute inset-0 flex flex-col items-center justify-center bg-surface-0/95 */
                                 <div className="nano-creation-card-loading">
-                                  <div className="nano-main-result-progress">
-                                    <div className="nano-main-result-progress-fill" />
+                                  <Sparkles className="nano-creation-card-loading-icon" size={20} />
+                                  <p className="nano-creation-card-loading-label">
+                                    {(row.cards.length > 1) ? `${cardIndex + 1} / ${row.cards.length}` : 'Generuji…'}
+                                  </p>
+                                  <div className="nano-creation-progress-track">
+                                    <div className="nano-creation-progress-fill" />
                                   </div>
                                 </div>
                               )}
-                              <span className="nano-creation-card-badge">
-                                <ImageIcon size={12} />
-                                <strong>{card.resolution}</strong>
-                              </span>
-                            </button>
+                              {/* Bottom-left badge — resolution — Magnific: fades on hover */}
+                              {card.url && (
+                                <div className="nano-creation-card-badges">
+                                  <div className="nano-creation-card-badge">
+                                    <ImageIcon size={10} />
+                                    <strong>{card.resolution}</strong>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                            {/* X delete button */}
                             {card.versionId && props.onDeleteVersion ? (
                               <button
                                 type="button"
@@ -577,6 +634,115 @@ function MainCanvas(props: {
           />
         </div>
       ) : null}
+
+      {/* ── Magnific Detail Modal ── */}
+      {detailModal && (() => {
+        const card = detailModal.cards[detailModal.index];
+        if (!card) return null;
+        return (
+          <div
+            className="mag-modal-overlay"
+            role="dialog"
+            aria-modal="true"
+            onClick={(e) => { if (e.target === e.currentTarget) setDetailModal(null); }}
+          >
+            <div className="mag-modal">
+              {/* Close */}
+              <button
+                type="button"
+                className="mag-modal-close"
+                aria-label="Zavřít"
+                onClick={() => setDetailModal(null)}
+              >
+                <X size={16} />
+              </button>
+              {/* Prev */}
+              <button
+                type="button"
+                className="mag-modal-prev"
+                disabled={detailModal.index <= 0}
+                onClick={() => setDetailModal(m => m ? { ...m, index: m.index - 1 } : null)}
+              >
+                <ChevronDown size={16} style={{ transform: 'rotate(90deg)' }} />
+              </button>
+              {/* Next */}
+              <button
+                type="button"
+                className="mag-modal-next"
+                disabled={detailModal.index >= detailModal.cards.length - 1}
+                onClick={() => setDetailModal(m => m ? { ...m, index: m.index + 1 } : null)}
+              >
+                <ChevronDown size={16} style={{ transform: 'rotate(-90deg)' }} />
+              </button>
+
+              {/* Left: image */}
+              <div className="mag-modal-image-side">
+                <img src={card.url} alt={card.label || card.prompt} />
+              </div>
+
+              {/* Right: sidebar */}
+              <aside className="mag-modal-sidebar">
+                {/* Tabs */}
+                <div className="mag-modal-tabs">
+                  <button type="button" className="mag-modal-tab active">Details</button>
+                  <button type="button" className="mag-modal-tab">Comments</button>
+                </div>
+
+                {/* Actions */}
+                <div className="mag-modal-actions">
+                  <button type="button" className="mag-modal-action-btn danger" title="Smazat">
+                    <X size={14} />
+                  </button>
+                  <div className="mag-modal-divider" />
+                  <a
+                    href={card.url}
+                    download
+                    className="mag-modal-download-btn"
+                    title="Stáhnout PNG"
+                  >
+                    <ImageIcon size={13} />
+                    PNG
+                  </a>
+                </div>
+
+                {/* Timestamp */}
+                <p className="mag-modal-timestamp">{formatRelativeTimeLabel(card.createdAt)} · Uloženo v projektu</p>
+
+                {/* Prompt */}
+                <div>
+                  <p className="mag-modal-section-title">Prompt</p>
+                  <p className="mag-modal-prompt-text">{card.prompt}</p>
+                </div>
+
+                {/* Settings badges */}
+                <div>
+                  <p className="mag-modal-section-title">Settings</p>
+                  <div className="mag-modal-badges">
+                    {card.aspectRatio && <span className="mag-modal-badge">{card.aspectRatio}</span>}
+                    {card.modelLabel && <span className="mag-modal-badge">{card.modelLabel}</span>}
+                    {card.resolution && <span className="mag-modal-badge">{card.resolution}</span>}
+                  </div>
+                </div>
+
+                {/* CTA buttons */}
+                <div className="mag-modal-cta-list">
+                  <button
+                    type="button"
+                    className="mag-modal-cta-btn primary"
+                    onClick={() => {
+                      if (card.versionId) props.onSelectVersion(card.versionId);
+                      setDetailModal(null);
+                    }}
+                  >
+                    <Sparkles size={13} />
+                    Použít obrázek
+                  </button>
+                </div>
+              </aside>
+            </div>
+          </div>
+        );
+      })()}
     </main>
   );
 }
