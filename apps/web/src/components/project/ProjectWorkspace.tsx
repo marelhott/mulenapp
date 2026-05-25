@@ -164,9 +164,12 @@ function formatAspectRatioLabel(value?: unknown) {
 }
 
 function formatModelBadge(model?: string) {
-  if (!model) return 'google nano banana 2';
-  if (model.includes('precise') || model.includes('balanced')) return 'google nano banana 2';
-  if (model.includes('gemini')) return 'google nano banana 2';
+  if (!model) return 'Nano 1';
+  if (model.includes('gemini-nano-1') || model.includes('2.5-flash')) return 'Nano 1';
+  if (model.includes('gemini-nano-2') || model.includes('2.0-flash')) return 'Nano 2';
+  if (model.includes('gemini-3-pro') || model.includes('3.0-pro')) return 'Gemini 3 Pro';
+  if (model.includes('gemini-best')) return 'Best';
+  if (model.includes('gemini')) return 'Nano 1';
   if (model.includes('openai')) return 'gpt image';
   return model.replace(/-/g, ' ');
 }
@@ -1214,11 +1217,10 @@ function NanoLeftSidebar(props: {
   onAspectRatioChange?: (value: 'original' | 'square' | 'portrait' | 'landscape') => void;
 }) {
   const imageModelPresets = [
-    { id: 'auto', title: 'Auto', subtitle: 'Automatic selection' },
-    { id: 'gemini-flash', title: 'Nano 2', subtitle: 'Gemini 3.1 Flash' },
-    { id: 'gemini-pro', title: 'Nano Pro', subtitle: 'Gemini 3 Pro' },
-    { id: 'openai-image', title: 'GPT Img 2', subtitle: 'OpenAI' },
-    { id: 'flux-pro', title: 'Flux Pro', subtitle: 'fal.ai' },
+    { id: 'gemini-nano-1', title: 'Nano 1', subtitle: 'Gemini 2.5 Flash' },
+    { id: 'gemini-nano-2', title: 'Nano 2', subtitle: 'Gemini 2.0 Flash' },
+    { id: 'gemini-3-pro', title: 'Gemini 3 Pro', subtitle: 'Gemini 3.0 Pro Preview' },
+    { id: 'gemini-best', title: 'Best', subtitle: 'Nejlepší dostupný model' },
   ];
   const referenceAssets = props.snapshot.assets.filter((asset) => asset.kind === 'reference');
   const originalAsset = props.snapshot.assets.find((asset) => asset.id === props.snapshot.project.originalAssetId);
@@ -2348,7 +2350,7 @@ export function ProjectWorkspace(props: {
   const [isSavePromptOpen, setIsSavePromptOpen] = useState(false);
   const [savedPromptDraftName, setSavedPromptDraftName] = useState('');
   const [selectedSavedPromptId, setSelectedSavedPromptId] = useState<string | null>(null);
-  const [selectedModelId, setSelectedModelId] = useState<string>('gemini-flash');
+  const [selectedModelId, setSelectedModelId] = useState<string>('gemini-nano-1');
 
   useEffect(() => {
     setModel(selectedModelId).catch(console.error);
@@ -3202,6 +3204,7 @@ export function ProjectWorkspace(props: {
           advancedVariant,
           faceIdentityMode,
           sourceVersionId: workspace.project.activeVersionId,
+          modelId: selectedModelId,
         });
 
         const finalJob = await waitForJob(job.id, (progressJob) => {

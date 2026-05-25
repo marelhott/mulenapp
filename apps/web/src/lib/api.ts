@@ -64,6 +64,7 @@ export const api = {
     advancedVariant?: 'A' | 'B' | 'C';
     faceIdentityMode?: boolean;
     sourceVersionId?: string;
+    modelId?: string;
   }) {
     return requestJson<GenerationJob>('/jobs', {
       method: 'POST',

@@ -1,7 +1,22 @@
 import type { Asset, EditStep, GenerationJob, ImageVersion, ModelRun, QualityEvaluation, WorkspaceSnapshot } from '@mulen/shared';
 import { canUseSupabaseStorage, persistGeneratedImageMetadata, uploadDataUrlToSupabase } from './supabaseStorage.js';
 
-const GEMINI_IMAGE_MODEL = 'gemini-2.0-flash-preview-image-generation';
+// Model routing — maps frontend modelId to actual Gemini API model name
+const GEMINI_MODEL_MAP: Record<string, string> = {
+  'gemini-nano-1': 'gemini-2.5-flash-preview-image-generation',
+  'gemini-nano-2': 'gemini-2.0-flash-preview-image-generation',
+  'gemini-3-pro': 'gemini-3.0-pro-preview-image-generation',
+  'gemini-best': 'gemini-3.0-pro-preview-image-generation',
+};
+const GEMINI_IMAGE_MODEL_DEFAULT = 'gemini-2.5-flash-preview-image-generation';
+
+function resolveGeminiImageModel(modelId?: string): string {
+  if (modelId && GEMINI_MODEL_MAP[modelId]) return GEMINI_MODEL_MAP[modelId];
+  return GEMINI_IMAGE_MODEL_DEFAULT;
+}
+
+// Backward compat alias used throughout this file for other modules
+const GEMINI_IMAGE_MODEL = GEMINI_IMAGE_MODEL_DEFAULT;
 const GEMINI_TEXT_MODEL = 'gemini-2.5-flash';
 const PROMPT_ENHANCER_SYSTEM_PROMPT = `You are a strict and disciplined AI prompt enhancer for image generation.
 
@@ -67,8 +82,9 @@ function extractGeminiImage(data: any) {
   return `data:${mime};base64,${imagePart.inlineData.data}`;
 }
 
-async function callGeminiImage(request: Record<string, unknown>, apiKey: string) {
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_IMAGE_MODEL)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+async function callGeminiImage(request: Record<string, unknown>, apiKey: string, modelId?: string) {
+  const model = resolveGeminiImageModel(modelId);
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
   const response = await fetch(endpoint, {
     method: 'POST',
     headers: {
@@ -434,6 +450,7 @@ export async function runLivePhotoDirectorJob(snapshot: WorkspaceSnapshot, job: 
         ],
       },
       apiKey,
+      String(input.modelId || ''),
     );
 
     const generatedDataUrl = extractGeminiImage(response);
