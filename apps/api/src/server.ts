@@ -247,6 +247,7 @@ app.post<{ Body: InlineUploadBody }>('/assets/inline-upload', async (request, re
   const store = await updateStore((current) => {
     const snapshot = current.snapshot;
     const nextAssets = [asset, ...snapshot.assets];
+    const originalVersionId = kind === 'original' ? createId('version-input') : null;
     const nextVisualCanon =
       kind === 'reference'
         ? {
@@ -260,7 +261,7 @@ app.post<{ Body: InlineUploadBody }>('/assets/inline-upload', async (request, re
       kind === 'original'
         ? [
             {
-              id: 'version-original',
+              id: originalVersionId!,
               projectId,
               assetId,
               label: 'Original',
@@ -268,7 +269,7 @@ app.post<{ Body: InlineUploadBody }>('/assets/inline-upload', async (request, re
               createdAt,
               qualityScore: 72,
             },
-            ...snapshot.versions.filter((version) => version.id !== 'version-original'),
+            ...snapshot.versions,
           ]
         : snapshot.versions;
 
@@ -282,7 +283,7 @@ app.post<{ Body: InlineUploadBody }>('/assets/inline-upload', async (request, re
         project: {
           ...snapshot.project,
           originalAssetId: kind === 'original' ? assetId : snapshot.project.originalAssetId,
-          activeVersionId: kind === 'original' ? 'version-original' : snapshot.project.activeVersionId,
+          activeVersionId: kind === 'original' ? originalVersionId! : snapshot.project.activeVersionId,
           updatedAt: createdAt,
         },
       },

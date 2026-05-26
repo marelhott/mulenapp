@@ -80,6 +80,7 @@ type SavedPrompt = {
 const SAVED_PROMPTS_STORAGE_KEY = 'mulen-saved-prompts';
 const SELECTED_IMAGE_MODEL_STORAGE_KEY = 'mulen-selected-image-model';
 const PROMPT_HISTORY_STORAGE_KEY = 'mulen-prompt-history-v1';
+const PHOTO_DIRECTOR_INPUT_ASSET_IDS_STORAGE_KEY = 'mulen-photo-director-input-assets-v1';
 
 type PhotoDirectorProviderUi = 'gemini' | 'chatgpt' | 'flux_pro' | 'grok' | 'replicate';
 
@@ -308,6 +309,37 @@ function createWorkspaceState(snapshot: WorkspaceSnapshot): WorkspaceState {
     styleTransferPrompt: 'Premium editorial daylight s cistsim pozadim a jemnejsim stylingem.',
     styleTransferPreserveComposition: true,
   };
+}
+
+function normalizePhotoDirectorInputAssetIds(
+  assetIds: string[],
+  assets: Asset[],
+  fallbackAssetId?: string,
+) {
+  const existingAssetIds = new Set(assets.map((asset) => asset.id));
+  const ordered = assetIds.filter((assetId, index) => assetIds.indexOf(assetId) === index && existingAssetIds.has(assetId));
+  if (fallbackAssetId && existingAssetIds.has(fallbackAssetId) && !ordered.includes(fallbackAssetId)) {
+    ordered.unshift(fallbackAssetId);
+  }
+  return ordered;
+}
+
+function getPhotoDirectorInputAssets(snapshot: WorkspaceState, assetIds: string[]) {
+  const uniqueIds = normalizePhotoDirectorInputAssetIds(assetIds, snapshot.assets, snapshot.project.originalAssetId);
+  return uniqueIds
+    .map((assetId) => snapshot.assets.find((asset) => asset.id === assetId))
+    .filter((asset): asset is Asset => Boolean(asset));
+}
+
+function readPersistedPhotoDirectorInputAssetIds() {
+  if (typeof window === 'undefined') return [] as string[];
+  try {
+    const raw = window.localStorage.getItem(PHOTO_DIRECTOR_INPUT_ASSET_IDS_STORAGE_KEY);
+    const parsed = raw ? (JSON.parse(raw) as string[]) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 }
 
 function getAsset(snapshot: WorkspaceSnapshot, version: ImageVersion): Asset | undefined {
@@ -1458,6 +1490,7 @@ function NanoLeftSidebar(props: {
   onHeadswapSourceUpload: (file: File) => void;
   onHeadswapTargetUpload: (file: File) => void;
   onSelectExistingAsset: (asset: Asset, slot: 'input' | 'style' | 'brand' | 'source-face' | 'target-scene') => void;
+  photoDirectorInputAssetIds: string[];
   onOutputCountChange: (value: number) => void;
   onGenerateAllModels: () => void;
   onGeneratePromptVariantsBatch: () => void;
@@ -1534,6 +1567,7 @@ function NanoLeftSidebar(props: {
   const imageModelPresets = props.imageModelPresets;
   const referenceAssets = props.snapshot.assets.filter((asset) => asset.kind === 'reference');
   const originalAsset = props.snapshot.assets.find((asset) => asset.id === props.snapshot.project.originalAssetId);
+  const inputAssets = getPhotoDirectorInputAssets(props.snapshot, props.photoDirectorInputAssetIds);
   const headswapSourceAsset = props.snapshot.assets.find((asset) => asset.id === props.snapshot.headswapSourceAssetId);
   const headswapTargetAsset = props.snapshot.assets.find((asset) => asset.id === props.snapshot.headswapTargetAssetId);
   const styleSlotAsset =
@@ -1594,6 +1628,7 @@ function NanoLeftSidebar(props: {
   };
   const uploadConfigs = getRouteUploadConfigs({
     route,
+    inputAssets,
     originalAsset,
     referenceAssets,
     lockedCount: props.snapshot.lockedAreas.length,
@@ -2242,7 +2277,7 @@ function NanoLeftSidebar(props: {
             >
               <UploadSection
                 asset={config.asset}
-                assets={config.asset ? [config.asset] : []}
+                assets={config.assets ?? (config.asset ? [config.asset] : [])}
                 count={config.count}
                 browseViaPopover
                 dragging={dragSection === config.dragKey}
@@ -2524,6 +2559,7 @@ function isRealAsset(asset: Asset | undefined): boolean {
 
 function getRouteUploadConfigs(input: {
   route: NanoRoute;
+  inputAssets: Asset[];
   originalAsset?: Asset;
   referenceAssets: Asset[];
   lockedCount: number;
@@ -2603,9 +2639,10 @@ function getRouteUploadConfigs(input: {
           dragKey: 'input' as const,
           mode: 'input' as const,
           title: 'Input images',
-          count: isRealAsset(input.originalAsset) ? 1 : 0,
-          helper: isRealAsset(input.originalAsset) ? input.originalAsset?.storagePath : 'Nahraj hlavni source fotku',
-          asset: isRealAsset(input.originalAsset) ? input.originalAsset : undefined,
+          count: input.inputAssets.length,
+          helper: input.inputAssets[0]?.storagePath ?? 'Nahraj hlavni source fotku',
+          asset: input.inputAssets[0],
+          assets: input.inputAssets,
         },
         {
           id: 'nano-style-upload',
@@ -2993,6 +3030,22 @@ export function ProjectWorkspace(props: {
 }) {
   const { snapshot } = props;
   const [workspace, setWorkspace] = useState(() => createWorkspaceState(snapshot));
+  const [photoDirectorInputAssetIds, setPhotoDirectorInputAssetIds] = useState<string[]>(() => {
+    if (typeof window === 'undefined') {
+      return snapshot.project.originalAssetId ? [snapshot.project.originalAssetId] : [];
+    }
+    try {
+      const raw = window.localStorage.getItem(PHOTO_DIRECTOR_INPUT_ASSET_IDS_STORAGE_KEY);
+      const parsed = raw ? (JSON.parse(raw) as string[]) : [];
+      return normalizePhotoDirectorInputAssetIds(
+        Array.isArray(parsed) ? parsed : [],
+        snapshot.assets,
+        snapshot.project.originalAssetId,
+      );
+    } catch {
+      return snapshot.project.originalAssetId ? [snapshot.project.originalAssetId] : [];
+    }
+  });
   const [isGenerating, setIsGenerating] = useState(false);
   const [workspaceNote, setWorkspaceNote] = useState('Pokracuj z aktivni verze a branchuj dalsi smery bez ztraty historie.');
   const [isEnhancing, setIsEnhancing] = useState(false);
@@ -3259,6 +3312,17 @@ export function ProjectWorkspace(props: {
     window.localStorage.setItem(SELECTED_IMAGE_MODEL_STORAGE_KEY, selectedModelId);
     setModel(selectedModelId).catch(console.error);
   }, [selectedModelId]);
+
+  useEffect(() => {
+    setPhotoDirectorInputAssetIds((current) =>
+      normalizePhotoDirectorInputAssetIds(current, workspace.assets, workspace.project.originalAssetId),
+    );
+  }, [workspace.assets, workspace.project.originalAssetId]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(PHOTO_DIRECTOR_INPUT_ASSET_IDS_STORAGE_KEY, JSON.stringify(photoDirectorInputAssetIds));
+  }, [photoDirectorInputAssetIds]);
 
   useEffect(() => {
     const currentPrompt = getPromptValueForRoute(props.activeRoute, workspace).trim();
@@ -3730,6 +3794,23 @@ export function ProjectWorkspace(props: {
     });
   };
 
+  const getBatchSourceVersionIds = () => {
+    const persistedIds = readPersistedPhotoDirectorInputAssetIds();
+    const inputAssets = getPhotoDirectorInputAssets(
+      workspace,
+      persistedIds.length ? persistedIds : photoDirectorInputAssetIds,
+    );
+    const versionIds = inputAssets
+      .map((asset) => workspace.versions.find((version) => version.assetId === asset.id)?.id)
+      .filter((versionId): versionId is string => Boolean(versionId));
+
+    if (!versionIds.length && workspace.project.activeVersionId) {
+      return [workspace.project.activeVersionId];
+    }
+
+    return versionIds;
+  };
+
   const buildPhotoDirectorJobInput = (options: {
     instruction: string;
     outputCount: number;
@@ -3829,6 +3910,9 @@ export function ProjectWorkspace(props: {
         startTransition(() => {
           setWorkspace(createWorkspaceState(response.snapshot));
         });
+        setPhotoDirectorInputAssetIds((current) =>
+          normalizePhotoDirectorInputAssetIds([response.asset.id, ...current], response.snapshot.assets, response.snapshot.project.originalAssetId),
+        );
         setWorkspaceNote(`Nova vstupni fotka ${file.name} se stala novym vychozim bodem projektu.`);
       } catch (error) {
         setWorkspaceNote(error instanceof Error ? error.message : 'Upload vstupni fotky selhal.');
@@ -3838,14 +3922,12 @@ export function ProjectWorkspace(props: {
 
     const fileUrl = URL.createObjectURL(file);
     const createdAt = new Date().toISOString();
+    const assetId = `asset-upload-${Date.now()}`;
+    const versionId = `version-upload-${Date.now()}`;
     setWorkspaceNote(`Nova vstupni fotka ${file.name} se stala novym vychozim bodem projektu.`);
 
     startTransition(() => {
       setWorkspace((current) => {
-        const assetId = `asset-upload-${Date.now()}`;
-        const versionId = `version-upload-${Date.now()}`;
-        const originalVersion = current.versions.find((version) => version.id === 'version-original');
-
         const nextAsset: Asset = {
           id: assetId,
           projectId: current.project.id,
@@ -3864,27 +3946,23 @@ export function ProjectWorkspace(props: {
           label: 'Uploaded original',
           module: 'photo-director',
           createdAt,
-          qualityScore: originalVersion?.qualityScore ?? 70,
+          qualityScore: 70,
         };
 
         return {
           ...current,
-          assets: [nextAsset, ...current.assets.filter((asset) => asset.id !== current.project.originalAssetId)],
-          versions: [nextVersion, ...current.versions.filter((version) => version.id !== 'version-original')],
+          assets: [nextAsset, ...current.assets],
+          versions: [nextVersion, ...current.versions],
           project: {
             ...current.project,
             originalAssetId: assetId,
             activeVersionId: versionId,
             updatedAt: createdAt,
           },
-          visualCanon: {
-            ...current.visualCanon,
-            referenceAssetIds: [assetId],
-            updatedAt: createdAt,
-          },
         };
       });
     });
+    setPhotoDirectorInputAssetIds((current) => [assetId, ...current.filter((currentId) => currentId !== assetId)]);
   };
 
   const uploadReferenceAssetToWorkspace = async (file: File, slot: 'style' | 'brand' = 'style') => {
@@ -3955,15 +4033,16 @@ export function ProjectWorkspace(props: {
 
   const handleSelectExistingAsset = (asset: Asset, slot: 'input' | 'style' | 'brand' | 'source-face' | 'target-scene') => {
     const createdAt = new Date().toISOString();
+    const isLibraryPlaceholder = asset.projectId === 'library' || asset.metadata?.placeholder === true;
+    const importedAssetId = isLibraryPlaceholder ? `asset-library-${slot}-${Date.now()}` : asset.id;
 
     startTransition(() => {
       setWorkspace((current) => {
-        const isLibraryPlaceholder = asset.projectId === 'library' || asset.metadata?.placeholder === true;
         const selectedAsset: Asset =
           isLibraryPlaceholder
             ? {
                 ...asset,
-                id: `asset-library-${slot}-${Date.now()}`,
+                id: importedAssetId,
                 projectId: current.project.id,
                 userId: current.project.userId,
                 kind: slot === 'input' || slot === 'target-scene' ? 'original' : 'reference',
@@ -3983,13 +4062,29 @@ export function ProjectWorkspace(props: {
         switch (slot) {
           case 'input': {
             const matchingVersion = current.versions.find((version) => version.assetId === selectedAsset.id);
+            const inputVersionId = matchingVersion?.id ?? `version-input-${Date.now()}`;
+            const nextVersions = matchingVersion
+              ? current.versions
+              : [
+                  {
+                    id: inputVersionId,
+                    projectId: current.project.id,
+                    assetId: selectedAsset.id,
+                    label: 'Input source',
+                    module: 'photo-director' as const,
+                    createdAt,
+                    qualityScore: 72,
+                  },
+                  ...current.versions,
+                ];
             return {
               ...current,
               assets,
+              versions: nextVersions,
               project: {
                 ...current.project,
                 originalAssetId: selectedAsset.id,
-                activeVersionId: matchingVersion?.id ?? current.project.activeVersionId,
+                activeVersionId: inputVersionId,
                 updatedAt: createdAt,
               },
             };
@@ -4032,6 +4127,10 @@ export function ProjectWorkspace(props: {
       });
     });
 
+    if (slot === 'input') {
+      setPhotoDirectorInputAssetIds((current) => [importedAssetId, ...current.filter((currentId) => currentId !== importedAssetId)]);
+    }
+
     const labels = {
       input: 'Vstupni slot ted pouziva vybrany obrazek z knihovny.',
       style: 'Stylovy slot ted odkazuje na vybrany obrazek z knihovny.',
@@ -4059,6 +4158,7 @@ export function ProjectWorkspace(props: {
         },
       }));
     });
+    setPhotoDirectorInputAssetIds((current) => [selectedAsset.id, ...current.filter((currentId) => currentId !== selectedAsset.id)]);
 
     setWorkspaceNote('Vybraný obrázek je teď nastavený jako nový vstup v Input images.');
   };
@@ -4173,6 +4273,25 @@ export function ProjectWorkspace(props: {
 
   const handleGenerate = async () => {
     if (props.activeRoute === 'mulen' && props.apiConfig?.features.photoDirector) {
+      const batchSourceVersionIds = getBatchSourceVersionIds();
+      if (batchSourceVersionIds.length > 1) {
+        const instruction = workspace.photoDirectorInstruction.trim();
+        await runPhotoDirectorBatch(
+          batchSourceVersionIds.map((sourceVersionId, index) => ({
+            instruction,
+            outputCount: workspace.photoDirectorOutputCount,
+            sourceVersionId,
+            progressLabel: 'Input batch',
+          })),
+          {
+            start: `Photo Director spousti batch pres ${batchSourceVersionIds.length} vstupnich obrazku.`,
+            success: `Photo Director batch dokoncen. Zpracovano ${batchSourceVersionIds.length} vstupnich obrazku.`,
+            partial: 'Photo Director batch skoncil jen castecne. Dokonceno bylo {count} vstupu.',
+          },
+        );
+        return;
+      }
+
       setIsGenerating(true);
       setWorkspaceNote('Photo Director odesila zadani do backend job systemu a ceka na novou verzi.');
 
@@ -4361,6 +4480,7 @@ export function ProjectWorkspace(props: {
     const liveModelPresets = imageModelPresets.filter((preset) =>
       providerCatalog.some((provider) => provider.id === preset.provider && provider.models.some((model) => model.id === preset.id)),
     );
+    const batchSourceVersionIds = getBatchSourceVersionIds();
 
     if (!liveModelPresets.length) {
       setWorkspaceNote('Pro gen/all models teď není dostupný žádný aktivní model.');
@@ -4368,15 +4488,24 @@ export function ProjectWorkspace(props: {
     }
 
     await runPhotoDirectorBatch(
-      liveModelPresets.map((preset) => ({
-        instruction,
-        outputCount: 1,
-        modelId: preset.id,
-        progressLabel: `Model ${preset.title}`,
-      })),
+      (batchSourceVersionIds.length ? batchSourceVersionIds : [undefined]).flatMap((sourceVersionId, inputIndex) =>
+        liveModelPresets.map((preset) => ({
+          instruction,
+          outputCount: 1,
+          modelId: preset.id,
+          sourceVersionId,
+          progressLabel:
+            batchSourceVersionIds.length > 1
+              ? `Input ${inputIndex + 1} · ${preset.title}`
+              : `Model ${preset.title}`,
+        })),
+      ),
       {
-        start: 'Photo Director spousti gen/all models pres vsechny aktivni modely.',
-        success: `Gen/all models dokoncen. Vzniklo ${liveModelPresets.length} samostatnych behu.`,
+        start:
+          batchSourceVersionIds.length > 1
+            ? `Photo Director spousti gen/all models pres ${batchSourceVersionIds.length} vstupy a vsechny aktivni modely.`
+            : 'Photo Director spousti gen/all models pres vsechny aktivni modely.',
+        success: `Gen/all models dokoncen. Vzniklo ${(batchSourceVersionIds.length || 1) * liveModelPresets.length} samostatnych behu.`,
         partial: 'Gen/all models skoncil jen castecne. Dokonceno bylo {count} behu.',
       },
     );
@@ -4396,6 +4525,7 @@ export function ProjectWorkspace(props: {
     try {
       const response = await api.generatePromptVariants({ prompt: instruction });
       const variants = response.variants.slice(0, 3);
+      const batchSourceVersionIds = getBatchSourceVersionIds();
 
       if (!variants.length) {
         setWorkspaceNote('Var/prompts nevratil zadne pouzitelne prompt varianty.');
@@ -4403,14 +4533,23 @@ export function ProjectWorkspace(props: {
       }
 
       await runPhotoDirectorBatch(
-        variants.map((variant, index) => ({
-          instruction: variant.prompt,
-          outputCount: 1,
-          progressLabel: `Varianta ${variant.variant || index + 1}`,
-        })),
+        (batchSourceVersionIds.length ? batchSourceVersionIds : [undefined]).flatMap((sourceVersionId, inputIndex) =>
+          variants.map((variant, index) => ({
+            instruction: variant.prompt,
+            outputCount: 1,
+            sourceVersionId,
+            progressLabel:
+              batchSourceVersionIds.length > 1
+                ? `Input ${inputIndex + 1} · varianta ${variant.variant || index + 1}`
+                : `Varianta ${variant.variant || index + 1}`,
+          })),
+        ),
         {
-          start: 'Photo Director spousti var/prompts pres tri prompt varianty.',
-          success: `Var/prompts dokoncen. Vznikly ${variants.length} variantove behy.`,
+          start:
+            batchSourceVersionIds.length > 1
+              ? `Photo Director spousti var/prompts pres ${batchSourceVersionIds.length} vstupy a prompt varianty.`
+              : 'Photo Director spousti var/prompts pres tri prompt varianty.',
+          success: `Var/prompts dokoncen. Vznikly ${(batchSourceVersionIds.length || 1) * variants.length} variantove behy.`,
           partial: 'Var/prompts skoncil jen castecne. Dokonceno bylo {count} behu.',
         },
       );
@@ -5973,6 +6112,7 @@ export function ProjectWorkspace(props: {
           onHeadswapSourceUpload={handleHeadswapSourceUpload}
           onHeadswapTargetUpload={handleHeadswapTargetUpload}
           onSelectExistingAsset={handleSelectExistingAsset}
+          photoDirectorInputAssetIds={photoDirectorInputAssetIds}
           onOutputCountChange={setOutputCount}
           onGenerateAllModels={handleGenerateAllModels}
           onGeneratePromptVariantsBatch={handleGeneratePromptVariantsBatch}
