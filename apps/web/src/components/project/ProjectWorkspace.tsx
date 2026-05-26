@@ -1888,11 +1888,13 @@ function NanoLeftSidebar(props: {
               selectedAssetId={config.asset?.id}
               onUploadFile={(file) => handleFile([file], config.mode)}
               onSelectAsset={(asset) => props.onSelectExistingAsset(asset, config.mode)}
+              openOnHover={false}
             >
               <UploadSection
                 asset={config.asset}
                 assets={config.asset ? [config.asset] : []}
                 count={config.count}
+                browseViaPopover
                 dragging={dragSection === config.dragKey}
                 onBrowse={() => document.getElementById(config.id)?.click()}
                 onDropFiles={(files) => handleFile(files, config.mode)}
@@ -1927,6 +1929,7 @@ function UploadSection(props: {
   onBrowse: () => void;
   onDropFiles: (files: FileList) => void;
   onDragStateChange: (active: boolean) => void;
+  browseViaPopover?: boolean;
 }) {
   const visibleAssets = (props.assets ?? (props.asset ? [props.asset] : [])).slice(0, 4);
 
@@ -1945,7 +1948,7 @@ function UploadSection(props: {
               : 'nano-upload-box'
         }
         onClick={(event) => {
-          if (event.target === event.currentTarget) props.onBrowse();
+          if (event.target === event.currentTarget && !props.browseViaPopover) props.onBrowse();
         }}
         onDragOver={(event) => {
           event.preventDefault();
@@ -1969,6 +1972,7 @@ function UploadSection(props: {
               type="button"
               className="nano-upload-thumb nano-upload-thumb-add"
               onClick={(event) => {
+                if (props.browseViaPopover) return;
                 event.stopPropagation();
                 props.onBrowse();
               }}
@@ -1982,6 +1986,7 @@ function UploadSection(props: {
             type="button"
             className="nano-upload-box-empty"
             onClick={(event) => {
+              if (props.browseViaPopover) return;
               event.stopPropagation();
               props.onBrowse();
             }}
