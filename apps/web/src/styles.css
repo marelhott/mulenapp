@@ -4341,8 +4341,11 @@ button.primary:hover {
 
 .nano-model-select-copy {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
   min-width: 0;
+  gap: 1px;
 }
 
 .nano-model-select-copy strong {
@@ -4350,6 +4353,12 @@ button.primary:hover {
   font-weight: 500;
   letter-spacing: 0;
   color: #1a1a1a;
+}
+
+.nano-model-select-copy small {
+  font-size: 8px;
+  line-height: 1.2;
+  color: #7b837d;
 }
 
 .nano-model-select-chevron {
@@ -4398,10 +4407,16 @@ button.primary:hover {
 
 .nano-model-provider-head {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
   padding: 0 6px 4px;
+}
+
+.nano-model-provider-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .nano-model-provider-head strong {
@@ -4415,6 +4430,48 @@ button.primary:hover {
 .nano-model-provider-head span {
   font-size: 8px;
   color: #8a918b;
+}
+
+.nano-model-provider-title em {
+  font-style: normal;
+  font-size: 7px;
+  line-height: 1;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 4px 6px;
+  border-radius: 999px;
+  border: 1px solid rgba(47, 58, 52, 0.1);
+}
+
+.nano-model-provider-title em.is-live {
+  color: #46603f;
+  background: #eff7e8;
+  border-color: rgba(126, 217, 87, 0.28);
+}
+
+.nano-model-provider-title em.is-soon {
+  color: #7a827c;
+  background: #f4f5f1;
+}
+
+.nano-model-provider-capabilities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 6px 8px;
+}
+
+.nano-model-provider-capabilities span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #f5f5f1;
+  font-size: 7px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #727a74;
 }
 
 .nano-model-select-option {
@@ -4473,6 +4530,17 @@ button.primary:hover {
 .nano-model-select-option.active span {
   font-size: 8px;
   color: #5f615c;
+}
+
+.nano-model-provider-empty {
+  margin: 0 6px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #f7f7f4;
+  border: 1px dashed rgba(47, 58, 52, 0.12);
+  font-size: 9px;
+  line-height: 1.45;
+  color: #69716b;
 }
 
 .nano-mini-actions button {

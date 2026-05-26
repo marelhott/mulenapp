@@ -93,11 +93,66 @@ type ImageModelPreset = {
   maxImages: number;
 };
 
+type ProviderShellGroup = {
+  id: string;
+  name: string;
+  icon: string;
+  supportsGrounding: boolean;
+  maxImages: number;
+  models: ImageModelPreset[];
+};
+
 const FALLBACK_IMAGE_MODEL_PRESETS: ImageModelPreset[] = [
   { id: 'gemini-flash', provider: 'gemini', providerLabel: 'Gemini', title: 'Nano 2', subtitle: 'Gemini 3.1 Flash', supportsGrounding: true, maxImages: 10 },
   { id: 'gemini-pro', provider: 'gemini', providerLabel: 'Gemini', title: 'Nano Pro', subtitle: 'Gemini 3 Pro', supportsGrounding: true, maxImages: 10 },
   { id: 'openai-image', provider: 'chatgpt', providerLabel: 'ChatGPT', title: 'GPT Img 2', subtitle: 'OpenAI', supportsGrounding: false, maxImages: 1 },
   { id: 'flux-pro', provider: 'flux_pro', providerLabel: 'FLUX Pro', title: 'Flux Pro', subtitle: 'fal.ai', supportsGrounding: false, maxImages: 4 },
+];
+
+const FALLBACK_PROVIDER_CATALOG: ProviderCatalogItem[] = [
+  {
+    id: 'gemini',
+    name: 'Gemini',
+    icon: 'gemini',
+    supportsGrounding: true,
+    maxImages: 10,
+    models: [
+      { id: 'gemini-flash', label: 'Nano 2', category: 'image' },
+      { id: 'gemini-pro', label: 'Nano Pro', category: 'image' },
+    ],
+  },
+  {
+    id: 'chatgpt',
+    name: 'ChatGPT',
+    icon: 'chatgpt',
+    supportsGrounding: false,
+    maxImages: 1,
+    models: [{ id: 'openai-image', label: 'GPT Img 2', category: 'image' }],
+  },
+  {
+    id: 'flux_pro',
+    name: 'FLUX Pro',
+    icon: 'flux',
+    supportsGrounding: false,
+    maxImages: 4,
+    models: [{ id: 'flux-pro', label: 'Flux Pro', category: 'image' }],
+  },
+  {
+    id: 'grok',
+    name: 'Grok',
+    icon: 'grok',
+    supportsGrounding: false,
+    maxImages: 1,
+    models: [],
+  },
+  {
+    id: 'replicate',
+    name: 'Replicate',
+    icon: 'replicate',
+    supportsGrounding: false,
+    maxImages: 8,
+    models: [],
+  },
 ];
 
 const DEFAULT_SEMANTIC_MIX: Record<keyof PromptCategories, boolean> = {
@@ -152,6 +207,12 @@ function mapProviderCatalogToModelPresets(providers: ProviderCatalogItem[]): Ima
         maxImages: provider.maxImages,
       })),
   );
+}
+
+function getProviderGroupSummary(group: ProviderShellGroup) {
+  if (!group.models.length) return 'Coming soon';
+  if (group.supportsGrounding) return `Grounding · max ${group.maxImages}`;
+  return `Direct render · max ${group.maxImages}`;
 }
 
 const MOCK_GENERATED_IMAGES = [
@@ -1472,6 +1533,7 @@ function NanoLeftSidebar(props: {
   promptHistoryEntries: PromptHistoryEntry[];
   currentPromptHistoryEntryId: string | null;
   imageModelPresets: ImageModelPreset[];
+  providerCatalog: ProviderCatalogItem[];
   selectedModelId?: string;
   onModelSelect?: (modelId: string) => void;
 }) {
@@ -1495,11 +1557,18 @@ function NanoLeftSidebar(props: {
   const route = props.activeRoute;
   const selectedModel =
     imageModelPresets.find((preset) => preset.id === props.selectedModelId) ?? imageModelPresets[0];
-  const modelGroups = imageModelPresets.reduce<Record<string, ImageModelPreset[]>>((acc, preset) => {
-    if (!acc[preset.providerLabel]) acc[preset.providerLabel] = [];
-    acc[preset.providerLabel].push(preset);
-    return acc;
-  }, {});
+  const providerGroups: ProviderShellGroup[] = props.providerCatalog.map((provider) => ({
+    id: provider.id,
+    name: provider.name,
+    icon: provider.icon,
+    supportsGrounding: provider.supportsGrounding,
+    maxImages: provider.maxImages,
+    models: imageModelPresets.filter((preset) => preset.provider === provider.id),
+  }));
+  const selectedProviderGroup =
+    providerGroups.find((group) => group.id === selectedModel?.provider) ??
+    providerGroups.find((group) => group.models.some((model) => model.id === selectedModel?.id)) ??
+    null;
   const referenceOptions = [
     { id: 'A', label: 'Authentic', description: 'Keeps the output natural and closest to the original feel.', icon: Sparkles },
     { id: 'B', label: 'Enhance', description: 'Adds more polish, clarity and commercial finish.', icon: BadgePlus },
@@ -1662,6 +1731,7 @@ function NanoLeftSidebar(props: {
             </span>
             <span className="nano-model-select-copy">
               <strong>{selectedModel.title}</strong>
+              {selectedProviderGroup ? <small>{getProviderGroupSummary(selectedProviderGroup)} · {selectedProviderGroup.name}</small> : null}
             </span>
             <span className="nano-model-select-chevron" aria-hidden="true">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
@@ -1671,33 +1741,43 @@ function NanoLeftSidebar(props: {
           </button>
           {isModelMenuOpen ? (
             <div className="nano-model-select-menu" role="listbox" aria-label="Model selection">
-              {Object.entries(modelGroups).map(([providerLabel, models]) => (
-                <div key={providerLabel} className="nano-model-provider-group">
+              {providerGroups.map((group) => (
+                <div key={group.id} className="nano-model-provider-group">
                   <div className="nano-model-provider-head">
-                    <strong>{providerLabel}</strong>
-                    <span>
-                      {models[0]?.supportsGrounding ? 'Grounding' : 'No grounding'} · max {models[0]?.maxImages ?? 1}
-                    </span>
+                    <div className="nano-model-provider-title">
+                      <strong>{group.name}</strong>
+                      <em className={group.models.length ? 'is-live' : 'is-soon'}>{group.models.length ? 'Live' : 'Coming soon'}</em>
+                    </div>
+                    <span>{getProviderGroupSummary(group)}</span>
                   </div>
-                  {models.map((preset) => {
-                    const isActive = preset.id === selectedModel.id;
-                    return (
-                      <button
-                        key={preset.id}
-                        type="button"
-                        className={isActive ? 'nano-model-select-option active' : 'nano-model-select-option'}
-                        onClick={() => {
-                          props.onModelSelect?.(preset.id);
-                          setIsModelMenuOpen(false);
-                        }}
-                        role="option"
-                        aria-selected={isActive}
-                      >
-                        <strong>{preset.title}</strong>
-                        <span>{preset.subtitle}</span>
-                      </button>
-                    );
-                  })}
+                  <div className="nano-model-provider-capabilities">
+                    <span>{group.supportsGrounding ? 'Grounding' : 'Direct render'}</span>
+                    <span>max {group.maxImages}</span>
+                    <span>{group.models.length} model{group.models.length === 1 ? '' : 's'}</span>
+                  </div>
+                  {group.models.length ? (
+                    group.models.map((preset) => {
+                      const isActive = preset.id === selectedModel.id;
+                      return (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          className={isActive ? 'nano-model-select-option active' : 'nano-model-select-option'}
+                          onClick={() => {
+                            props.onModelSelect?.(preset.id);
+                            setIsModelMenuOpen(false);
+                          }}
+                          role="option"
+                          aria-selected={isActive}
+                        >
+                          <strong>{preset.title}</strong>
+                          <span>{preset.subtitle}</span>
+                        </button>
+                      );
+                    })
+                  ) : (
+                    <div className="nano-model-provider-empty">Provider je připravený uvnitř, ale zatím bez aktivního modelu ve frontendu.</div>
+                  )}
                 </div>
               ))}
             </div>
@@ -2930,6 +3010,7 @@ export function ProjectWorkspace(props: {
   const [selectedSavedPromptId, setSelectedSavedPromptId] = useState<string | null>(null);
   const [selectedModelId, setSelectedModelId] = useState<string>('gemini-flash');
   const [imageModelPresets, setImageModelPresets] = useState<ImageModelPreset[]>(FALLBACK_IMAGE_MODEL_PRESETS);
+  const [providerCatalog, setProviderCatalog] = useState<ProviderCatalogItem[]>(FALLBACK_PROVIDER_CATALOG);
   const [semanticReferencePrompt, setSemanticReferencePrompt] = useState('');
   const [semanticMixSelection, setSemanticMixSelection] = useState<Record<keyof PromptCategories, boolean>>(DEFAULT_SEMANTIC_MIX);
   const [semanticPromptVariants, setSemanticPromptVariants] = useState<Array<{ variant: string; approach: string; prompt: string }>>([]);
@@ -3014,6 +3095,7 @@ export function ProjectWorkspace(props: {
       try {
         const response = await api.getProviderCatalog();
         if (cancelled) return;
+        setProviderCatalog(response.providers);
         const nextPresets = mapProviderCatalogToModelPresets(response.providers);
         if (nextPresets.length) {
           setImageModelPresets(nextPresets);
@@ -3023,7 +3105,9 @@ export function ProjectWorkspace(props: {
           setSelectedModelId(nextModel);
         }
       } catch {
-        if (typeof window === 'undefined' || cancelled) return;
+        if (cancelled) return;
+        setProviderCatalog(FALLBACK_PROVIDER_CATALOG);
+        if (typeof window === 'undefined') return;
         const savedModelId = window.localStorage.getItem(SELECTED_IMAGE_MODEL_STORAGE_KEY);
         const nextModel = FALLBACK_IMAGE_MODEL_PRESETS.find((preset) => preset.id === savedModelId)?.id ?? FALLBACK_IMAGE_MODEL_PRESETS[0].id;
         setSelectedModelId(nextModel);
@@ -5826,6 +5910,7 @@ export function ProjectWorkspace(props: {
           promptHistoryEntries={promptHistoryEntries}
           currentPromptHistoryEntryId={currentPromptHistoryEntryId}
           imageModelPresets={imageModelPresets}
+          providerCatalog={providerCatalog}
           selectedModelId={selectedModelId}
           onModelSelect={setSelectedModelId}
         />
