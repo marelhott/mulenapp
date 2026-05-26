@@ -931,6 +931,7 @@ button.primary:hover {
 }
 
 .nano-prompt-surface-footer {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1005,12 +1006,18 @@ button.primary:hover {
 }
 
 .nano-ai-prompt-wrap {
-  position: relative;
+  position: static;
 }
 
 .nano-ai-prompt-popover {
-  width: 420px;
+  left: 0 !important;
+  right: 0 !important;
+  width: auto !important;
+  max-width: none !important;
+  min-height: 0;
+  max-height: min(72vh, 560px);
   gap: 12px;
+  overflow: auto;
 }
 
 .nano-ai-prompt-tabs {
