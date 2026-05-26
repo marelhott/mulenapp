@@ -1708,7 +1708,7 @@ function NanoLeftSidebar(props: {
           {route === 'mulen' ? (
             <>
               <div className="nano-reference-block" ref={referenceMenuRef}>
-                <strong>PREFERENCES</strong>
+                <strong>Preferences</strong>
                 <button
                   type="button"
                   className={`nano-model-select-trigger nano-reference-select-trigger ${isReferenceMenuOpen ? 'open' : ''}`}
