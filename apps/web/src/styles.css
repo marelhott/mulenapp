@@ -1142,6 +1142,18 @@ button.primary:hover {
   gap: 4px;
 }
 
+.nano-ai-history-card span {
+  font-size: 8px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #7a847e;
+}
+
+.nano-ai-history-card.active {
+  background: #eef6e8;
+  border-color: rgba(126, 217, 87, 0.34);
+}
+
 .nano-ai-variant-card strong {
   font-size: 11px;
   color: #232723;

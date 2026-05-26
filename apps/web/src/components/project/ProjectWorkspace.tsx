@@ -19,7 +19,7 @@ import { ImageComparisonModal } from './ImageComparisonModal';
 import type { NanoRoute } from '../../types/nano';
 import { getNanoRouteLabel, mapNanoRouteToModule } from '../../types/nano';
 import { api, fileToDataUrl, setModel, type ApiConfig, type ProviderCatalogItem, type SavedPromptRecord, waitForJob } from '../../lib/api';
-import { PromptHistory } from '../../lib/promptHistory';
+import { PromptHistory, type PromptHistoryEntry } from '../../lib/promptHistory';
 import { CATEGORY_LABELS, parsePromptToCategories, type PromptCategories } from '../../lib/semanticPromptRemix';
 
 type WorkspaceState = {
@@ -79,6 +79,7 @@ type SavedPrompt = {
 
 const SAVED_PROMPTS_STORAGE_KEY = 'mulen-saved-prompts';
 const SELECTED_IMAGE_MODEL_STORAGE_KEY = 'mulen-selected-image-model';
+const PROMPT_HISTORY_STORAGE_KEY = 'mulen-prompt-history-v1';
 
 type PhotoDirectorProviderUi = 'gemini' | 'chatgpt' | 'flux_pro' | 'grok' | 'replicate';
 
@@ -1430,6 +1431,7 @@ function NanoLeftSidebar(props: {
   onEnhancePrompt: () => void;
   onUndoPromptEnhance: () => void;
   onRedoPromptHistory: () => void;
+  onSelectPromptHistoryEntry: (entryId: string) => void;
   onGeneratePromptVariants: () => void;
   onApplyPromptVariant: (prompt: string) => void;
   onSemanticReferencePromptChange: (value: string) => void;
@@ -1467,7 +1469,8 @@ function NanoLeftSidebar(props: {
   semanticReferencePrompt: string;
   semanticMixSelection: Record<keyof PromptCategories, boolean>;
   semanticPromptVariants: Array<{ variant: string; approach: string; prompt: string }>;
-  promptHistoryEntries: string[];
+  promptHistoryEntries: PromptHistoryEntry[];
+  currentPromptHistoryEntryId: string | null;
   imageModelPresets: ImageModelPreset[];
   selectedModelId?: string;
   onModelSelect?: (modelId: string) => void;
@@ -1855,9 +1858,15 @@ function NanoLeftSidebar(props: {
                             </div>
                             <div className="nano-ai-history-list">
                               {props.promptHistoryEntries.length ? (
-                                props.promptHistoryEntries.map((entry, index) => (
-                                  <button key={`${index}-${entry.slice(0, 12)}`} type="button" className="nano-ai-history-card" onClick={() => props.onLoadPrompt(entry)}>
-                                    <p>{entry}</p>
+                                props.promptHistoryEntries.map((entry) => (
+                                  <button
+                                    key={entry.id}
+                                    type="button"
+                                    className={entry.id === props.currentPromptHistoryEntryId ? 'nano-ai-history-card active' : 'nano-ai-history-card'}
+                                    onClick={() => props.onSelectPromptHistoryEntry(entry.id)}
+                                  >
+                                    <span>{new Date(entry.createdAt).toLocaleString('cs-CZ', { dateStyle: 'short', timeStyle: 'short' })}</span>
+                                    <p>{entry.prompt}</p>
                                   </button>
                                 ))
                               ) : (
@@ -2961,6 +2970,43 @@ export function ProjectWorkspace(props: {
 
   const getPromptHistory = (route: NanoRoute) => promptHistoryRef.current[route];
 
+  const getCurrentHistoryPrompt = (route: NanoRoute) => {
+    const history = getPromptHistory(route);
+    const currentId = history.getCurrentEntryId();
+    if (!currentId) return '';
+    const currentEntry = history.getEntries().find((entry) => entry.id === currentId);
+    return currentEntry?.prompt ?? '';
+  };
+
+  const applyPromptHistoryToWorkspace = (state: WorkspaceState): WorkspaceState => ({
+    ...state,
+    photoDirectorInstruction: getCurrentHistoryPrompt('mulen') || state.photoDirectorInstruction,
+    visualGuidePrompt: getCurrentHistoryPrompt('visual-guide') || state.visualGuidePrompt,
+    infographicTopic: getCurrentHistoryPrompt('infographic') || state.infographicTopic,
+  });
+
+  const persistPromptHistories = () => {
+    if (typeof window === 'undefined') return;
+    const snapshot = Object.fromEntries(
+      (Object.keys(promptHistoryRef.current) as NanoRoute[]).map((route) => [route, promptHistoryRef.current[route].serialize()]),
+    );
+    window.localStorage.setItem(PROMPT_HISTORY_STORAGE_KEY, JSON.stringify(snapshot));
+  };
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = window.localStorage.getItem(PROMPT_HISTORY_STORAGE_KEY);
+      const parsed = raw ? (JSON.parse(raw) as Partial<Record<NanoRoute, ReturnType<PromptHistory['serialize']>>>) : null;
+      if (!parsed) return;
+      (Object.keys(promptHistoryRef.current) as NanoRoute[]).forEach((route) => {
+        promptHistoryRef.current[route].restore(parsed[route]);
+      });
+    } catch {
+      // Keep UI usable even if prompt history storage is corrupted.
+    }
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -2997,7 +3043,7 @@ export function ProjectWorkspace(props: {
     );
     startTransition(() => {
       setWorkspace((current) => {
-        const next = createWorkspaceState(nextSnapshot);
+        const next = applyPromptHistoryToWorkspace(createWorkspaceState(nextSnapshot));
         next.headswapSourceAssetId = current.headswapSourceAssetId;
         next.headswapTargetAssetId = current.headswapTargetAssetId ?? next.headswapTargetAssetId;
         next.headswapHairMode = current.headswapHairMode;
@@ -3046,7 +3092,11 @@ export function ProjectWorkspace(props: {
 
   useEffect(() => {
     startTransition(() => {
-      setWorkspace(createWorkspaceState(filterDeletedEntities(snapshot, deletedVersionIdsRef.current, deletedJobIdsRef.current)));
+      setWorkspace(
+        applyPromptHistoryToWorkspace(
+          createWorkspaceState(filterDeletedEntities(snapshot, deletedVersionIdsRef.current, deletedJobIdsRef.current)),
+        ),
+      );
     });
   }, [snapshot]);
 
@@ -3132,8 +3182,9 @@ export function ProjectWorkspace(props: {
     const currentPrompt = getPromptValueForRoute(props.activeRoute, workspace).trim();
     if (!currentPrompt) return;
     const history = getPromptHistory(props.activeRoute);
-    if (history.getAll().length === 0) {
+    if (!history.hasEntries()) {
       history.add(currentPrompt);
+      persistPromptHistories();
     }
   }, [props.activeRoute, workspace.photoDirectorInstruction, workspace.visualGuidePrompt, workspace.infographicTopic]);
 
@@ -3187,11 +3238,13 @@ export function ProjectWorkspace(props: {
 
   const activePromptHistory = getPromptHistory(props.activeRoute);
   const currentPromptValue = getPromptValueForRoute(props.activeRoute, workspace);
-  const promptHistoryEntries = [...activePromptHistory.getAll()].reverse();
+  const promptHistoryEntries = [...activePromptHistory.getEntries()].reverse();
+  const currentPromptHistoryEntryId = activePromptHistory.getCurrentEntryId();
 
   const setPromptValueForRoute = (route: NanoRoute, value: string, options?: { addToHistory?: boolean }) => {
     if (options?.addToHistory !== false) {
       getPromptHistory(route).add(value);
+      persistPromptHistories();
     }
     startTransition(() => {
       setWorkspace((current) => {
@@ -3235,6 +3288,7 @@ export function ProjectWorkspace(props: {
   const handleUndoPromptEnhance = () => {
     const previous = getPromptHistory(props.activeRoute).undo();
     if (!previous) return;
+    persistPromptHistories();
     setPromptValueForRoute(props.activeRoute, previous, { addToHistory: false });
     setEnhanceError(null);
   };
@@ -3242,7 +3296,16 @@ export function ProjectWorkspace(props: {
   const handleRedoPromptHistory = () => {
     const next = getPromptHistory(props.activeRoute).redo();
     if (!next) return;
+    persistPromptHistories();
     setPromptValueForRoute(props.activeRoute, next, { addToHistory: false });
+    setEnhanceError(null);
+  };
+
+  const handleSelectPromptHistoryEntry = (entryId: string) => {
+    const selected = getPromptHistory(props.activeRoute).jumpTo(entryId);
+    if (!selected) return;
+    persistPromptHistories();
+    setPromptValueForRoute(props.activeRoute, selected, { addToHistory: false });
     setEnhanceError(null);
   };
 
@@ -5719,6 +5782,7 @@ export function ProjectWorkspace(props: {
           onEnhancePrompt={handleEnhancePrompt}
           onUndoPromptEnhance={handleUndoPromptEnhance}
           onRedoPromptHistory={handleRedoPromptHistory}
+          onSelectPromptHistoryEntry={handleSelectPromptHistoryEntry}
           onGeneratePromptVariants={handleGeneratePromptVariants}
           onApplyPromptVariant={(prompt) => setPromptValueForRoute(props.activeRoute, prompt)}
           onSemanticReferencePromptChange={setSemanticReferencePrompt}
@@ -5760,6 +5824,7 @@ export function ProjectWorkspace(props: {
           semanticMixSelection={semanticMixSelection}
           semanticPromptVariants={semanticPromptVariants}
           promptHistoryEntries={promptHistoryEntries}
+          currentPromptHistoryEntryId={currentPromptHistoryEntryId}
           imageModelPresets={imageModelPresets}
           selectedModelId={selectedModelId}
           onModelSelect={setSelectedModelId}
