@@ -355,6 +355,16 @@ export const ImageComparisonModal: React.FC<ImageComparisonModalProps> = ({
                 </div>
               </div>
             )}
+
+            {lineage && (lineage.sourceImageUrls.length > 0 || lineage.styleImageUrls.length > 0) && (
+              <div className="space-y-2 pt-2 border-t" style={{ borderColor: 'var(--border-color, #333)' }}>
+                <h4 className="text-gray-500 text-[10px] uppercase tracking-widest font-bold">Lineage</h4>
+                <div className="grid grid-cols-2 gap-2 text-[9px]">
+                  <div><span className="text-gray-500">Source images:</span> <span className="text-gray-300">{lineage.sourceImageUrls.length}</span></div>
+                  <div><span className="text-gray-500">Reference images:</span> <span className="text-gray-300">{lineage.styleImageUrls.length}</span></div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

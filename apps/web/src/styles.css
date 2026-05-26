@@ -1004,6 +1004,168 @@ button.primary:hover {
   cursor: not-allowed;
 }
 
+.nano-ai-prompt-wrap {
+  position: relative;
+}
+
+.nano-ai-prompt-popover {
+  width: 420px;
+  gap: 12px;
+}
+
+.nano-ai-prompt-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.nano-ai-prompt-tabs button {
+  min-height: 28px;
+  border: 1px solid rgba(47, 58, 52, 0.1);
+  border-radius: 8px;
+  background: #f7f7f3;
+  font-size: 9px;
+  font-weight: 700;
+  color: #5a625d;
+}
+
+.nano-ai-prompt-tabs button.active {
+  background: #eef6e8;
+  border-color: rgba(126, 217, 87, 0.34);
+  color: #36553b;
+}
+
+.nano-ai-panel-section {
+  display: grid;
+  gap: 10px;
+}
+
+.nano-ai-panel-section p {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.45;
+  color: #5d6660;
+}
+
+.nano-ai-panel-textarea {
+  width: 100%;
+  min-height: 88px;
+  resize: vertical;
+  padding: 10px 12px;
+  border: 1px solid rgba(47, 58, 52, 0.12);
+  border-radius: 12px;
+  background: #fbfbf8;
+  color: #212421;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.nano-ai-category-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.nano-ai-category-preview span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: #f2f3ee;
+  font-size: 9px;
+  color: #5f6862;
+}
+
+.nano-ai-mix-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.nano-ai-mix-grid button,
+.nano-ai-panel-secondary,
+.nano-ai-panel-primary,
+.nano-ai-history-card,
+.nano-ai-variant-card {
+  border: 1px solid rgba(47, 58, 52, 0.12);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.nano-ai-mix-grid button {
+  min-height: 28px;
+  padding: 0 8px;
+  font-size: 9px;
+  color: #56605a;
+}
+
+.nano-ai-mix-grid button.active {
+  background: #eef6e8;
+  border-color: rgba(126, 217, 87, 0.34);
+  color: #36553b;
+}
+
+.nano-ai-panel-primary,
+.nano-ai-panel-secondary {
+  min-height: 34px;
+  padding: 0 12px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #3a443d;
+}
+
+.nano-ai-panel-primary {
+  background: #f2f7eb;
+}
+
+.nano-ai-panel-headline {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.nano-ai-variants-list,
+.nano-ai-history-list {
+  display: grid;
+  gap: 8px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.nano-ai-variant-card,
+.nano-ai-history-card {
+  width: 100%;
+  padding: 10px 12px;
+  text-align: left;
+  display: grid;
+  gap: 4px;
+}
+
+.nano-ai-variant-card strong {
+  font-size: 11px;
+  color: #232723;
+}
+
+.nano-ai-variant-card span {
+  font-size: 9px;
+  color: #69726d;
+}
+
+.nano-ai-variant-card p,
+.nano-ai-history-card p,
+.nano-ai-panel-empty {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.45;
+  color: #4f5853;
+}
+
+.nano-ai-history-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .nano-prompt-header {
   display: flex;
   align-items: center;
@@ -2243,11 +2405,13 @@ button.primary:hover {
 
 .nano-inline-prompt-popover--floating {
   position: absolute;
-  right: -8px;
+  left: 0;
+  right: auto;
   top: calc(100% + 8px);
   width: 420px;
+  max-width: min(420px, calc(100vw - 280px));
   min-height: 220px;
-  z-index: 12;
+  z-index: 120;
   padding: 18px 18px 12px;
   border-radius: 18px;
   border-color: rgba(47, 58, 52, 0.14);
@@ -4207,6 +4371,38 @@ button.primary:hover {
   border: 1px solid #ecebe6;
   box-shadow: 0 20px 44px rgba(33, 35, 27, 0.12), 0 3px 10px rgba(33, 35, 27, 0.06);
   backdrop-filter: blur(14px);
+}
+
+.nano-model-provider-group {
+  display: grid;
+  gap: 2px;
+}
+
+.nano-model-provider-group + .nano-model-provider-group {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(228, 228, 222, 0.72);
+}
+
+.nano-model-provider-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 6px 4px;
+}
+
+.nano-model-provider-head strong {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #677068;
+}
+
+.nano-model-provider-head span {
+  font-size: 8px;
+  color: #8a918b;
 }
 
 .nano-model-select-option {

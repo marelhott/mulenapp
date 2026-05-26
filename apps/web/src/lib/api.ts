@@ -1,5 +1,27 @@
 import type { Asset, GenerationJob, MulenModule, WorkspaceSnapshot } from '@mulen/shared';
 
+export type ProviderCatalogItem = {
+  id: string;
+  name: string;
+  icon: string;
+  supportsGrounding: boolean;
+  maxImages: number;
+  models: Array<{
+    id: string;
+    label: string;
+    category: 'image' | 'edit' | 'compare';
+  }>;
+};
+
+export type SavedPromptRecord = {
+  id: string;
+  name: string;
+  prompt: string;
+  category?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type ApiConfig = {
   ok: boolean;
   mode: 'mock' | 'live';
@@ -36,6 +58,9 @@ export const api = {
   baseUrl: API_BASE_URL,
   getConfig() {
     return requestJson<ApiConfig>('/config');
+  },
+  getProviderCatalog() {
+    return requestJson<{ ok: true; providers: ProviderCatalogItem[] }>('/providers/catalog');
   },
   getProject(projectId: string) {
     return requestJson<WorkspaceSnapshot>(`/projects/${projectId}`);
@@ -108,11 +133,33 @@ export const api = {
       body: JSON.stringify(input),
     });
   },
+  remixPrompt(input: {
+    promptA: string;
+    promptB: string;
+    mix: Record<string, 'A' | 'B'>;
+  }) {
+    return requestJson<{ ok: true; prompt: string }>('/prompt/remix', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
   generatePromptVariants(input: { prompt: string }) {
     return requestJson<{ ok: true; variants: Array<{ variant: string; approach: string; prompt: string }> }>('/prompt/variants', {
       method: 'POST',
       body: JSON.stringify(input),
     });
+  },
+  getSavedPrompts() {
+    return requestJson<{ ok: true; prompts: SavedPromptRecord[] }>('/saved-prompts');
+  },
+  saveSavedPrompt(input: { id?: string; name: string; prompt: string; category?: string }) {
+    return requestJson<{ ok: true; prompt: SavedPromptRecord }>('/saved-prompts', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+  deleteSavedPrompt(id: string) {
+    return fetch(`${API_BASE_URL}/saved-prompts/${id}`, { method: 'DELETE' });
   },
   deleteJob(jobId: string) {
     return fetch(`${API_BASE_URL}/jobs/${jobId}`, { method: 'DELETE' });

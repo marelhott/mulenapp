@@ -18,8 +18,9 @@ import { AssetLibraryPopover } from './AssetLibraryPopover';
 import { ImageComparisonModal } from './ImageComparisonModal';
 import type { NanoRoute } from '../../types/nano';
 import { getNanoRouteLabel, mapNanoRouteToModule } from '../../types/nano';
-import { api, fileToDataUrl, setModel, type ApiConfig, waitForJob } from '../../lib/api';
+import { api, fileToDataUrl, setModel, type ApiConfig, type ProviderCatalogItem, type SavedPromptRecord, waitForJob } from '../../lib/api';
 import { PromptHistory } from '../../lib/promptHistory';
+import { CATEGORY_LABELS, parsePromptToCategories, type PromptCategories } from '../../lib/semanticPromptRemix';
 
 type WorkspaceState = {
   project: Project;
@@ -72,19 +73,85 @@ type SavedPrompt = {
   name: string;
   text: string;
   createdAt: string;
+  updatedAt?: string;
+  category?: string;
 };
 
 const SAVED_PROMPTS_STORAGE_KEY = 'mulen-saved-prompts';
 const SELECTED_IMAGE_MODEL_STORAGE_KEY = 'mulen-selected-image-model';
 
-type PhotoDirectorProviderUi = 'gemini' | 'chatgpt' | 'flux_pro';
+type PhotoDirectorProviderUi = 'gemini' | 'chatgpt' | 'flux_pro' | 'grok' | 'replicate';
 
-const IMAGE_MODEL_PRESETS: Array<{ id: string; provider: PhotoDirectorProviderUi; title: string; subtitle: string }> = [
-  { id: 'gemini-flash', provider: 'gemini', title: 'Nano 2', subtitle: 'Gemini 3.1 Flash' },
-  { id: 'gemini-pro', provider: 'gemini', title: 'Nano Pro', subtitle: 'Gemini 3 Pro' },
-  { id: 'openai-image', provider: 'chatgpt', title: 'GPT Img 2', subtitle: 'OpenAI' },
-  { id: 'flux-pro', provider: 'flux_pro', title: 'Flux Pro', subtitle: 'fal.ai' },
+type ImageModelPreset = {
+  id: string;
+  provider: PhotoDirectorProviderUi;
+  providerLabel: string;
+  title: string;
+  subtitle: string;
+  supportsGrounding: boolean;
+  maxImages: number;
+};
+
+const FALLBACK_IMAGE_MODEL_PRESETS: ImageModelPreset[] = [
+  { id: 'gemini-flash', provider: 'gemini', providerLabel: 'Gemini', title: 'Nano 2', subtitle: 'Gemini 3.1 Flash', supportsGrounding: true, maxImages: 10 },
+  { id: 'gemini-pro', provider: 'gemini', providerLabel: 'Gemini', title: 'Nano Pro', subtitle: 'Gemini 3 Pro', supportsGrounding: true, maxImages: 10 },
+  { id: 'openai-image', provider: 'chatgpt', providerLabel: 'ChatGPT', title: 'GPT Img 2', subtitle: 'OpenAI', supportsGrounding: false, maxImages: 1 },
+  { id: 'flux-pro', provider: 'flux_pro', providerLabel: 'FLUX Pro', title: 'Flux Pro', subtitle: 'fal.ai', supportsGrounding: false, maxImages: 4 },
 ];
+
+const DEFAULT_SEMANTIC_MIX: Record<keyof PromptCategories, boolean> = {
+  subject: false,
+  environment: false,
+  style: true,
+  lighting: true,
+  mood: true,
+  technical: true,
+  other: false,
+};
+
+function normalizeSavedPromptRecord(prompt: SavedPromptRecord): SavedPrompt {
+  return {
+    id: prompt.id,
+    name: prompt.name,
+    text: prompt.prompt,
+    createdAt: prompt.createdAt,
+    updatedAt: prompt.updatedAt,
+    category: prompt.category,
+  };
+}
+
+function normalizeLegacySavedPromptRecord(item: Partial<SavedPrompt> & { prompt?: string }) {
+  const id = String(item.id);
+  const text = typeof item.text === 'string' ? item.text : String(item.prompt ?? '');
+  const name =
+    typeof item.name === 'string' && item.name.trim()
+      ? item.name.trim()
+      : text.slice(0, 36).trim() || 'Ulozeny prompt';
+
+  return {
+    id,
+    name,
+    text,
+    createdAt: typeof item.createdAt === 'string' ? item.createdAt : new Date().toISOString(),
+    category: typeof item.category === 'string' ? item.category : undefined,
+  } satisfies SavedPrompt;
+}
+
+function mapProviderCatalogToModelPresets(providers: ProviderCatalogItem[]): ImageModelPreset[] {
+  return providers.flatMap((provider) =>
+    provider.models
+      .filter((model) => model.category === 'image')
+      .map((model) => ({
+        id: model.id,
+        provider: provider.id as PhotoDirectorProviderUi,
+        providerLabel: provider.name,
+        title: model.label,
+        subtitle: provider.name,
+        supportsGrounding: provider.supportsGrounding,
+        maxImages: provider.maxImages,
+      })),
+  );
+}
 
 const MOCK_GENERATED_IMAGES = [
   'https://images.unsplash.com/photo-1511499767150-a48a237f0083?auto=format&fit=crop&w=1200&q=80',
@@ -779,6 +846,24 @@ function MainCanvas(props: {
         resolution={zoomedAsset?.metadata?.resolution as string}
         aspectRatio={zoomedAsset?.metadata?.aspectRatio as string}
         groundingMetadata={zoomedAsset?.metadata?.groundingMetadata}
+        lineage={{
+          sourceImageIds: zoomedVersion?.parentVersionId ? [zoomedVersion.parentVersionId] : [],
+          styleImageIds: props.snapshot.visualCanon.referenceAssetIds,
+          sourceImageUrls: zoomedVersion?.parentVersionId
+            ? props.snapshot.versions
+                .filter((version) => version.id === zoomedVersion.parentVersionId)
+                .map((version) => props.snapshot.assets.find((asset) => asset.id === version.assetId)?.url)
+                .filter(Boolean) as string[]
+            : [],
+          styleImageUrls: props.snapshot.visualCanon.referenceAssetIds
+            .map((assetId) => props.snapshot.assets.find((asset) => asset.id === assetId)?.url)
+            .filter(Boolean) as string[],
+        }}
+        versions={photoDirectorVersions.map((version) => ({
+          url: props.snapshot.assets.find((asset) => asset.id === version.assetId)?.url ?? '',
+          prompt: version.label ?? '',
+          timestamp: Date.parse(version.createdAt),
+        }))}
         onNext={() => {
           const idx = photoDirectorVersions.findIndex((v: ImageVersion) => v.id === zoomedVersionId);
           if (idx < photoDirectorVersions.length - 1) setZoomedVersionId(photoDirectorVersions[idx + 1].id);
@@ -1344,6 +1429,12 @@ function NanoLeftSidebar(props: {
   isGenerating: boolean;
   onEnhancePrompt: () => void;
   onUndoPromptEnhance: () => void;
+  onRedoPromptHistory: () => void;
+  onGeneratePromptVariants: () => void;
+  onApplyPromptVariant: (prompt: string) => void;
+  onSemanticReferencePromptChange: (value: string) => void;
+  onToggleSemanticMixCategory: (key: keyof PromptCategories) => void;
+  onRunSemanticPromptRemix: () => void;
   onOpenSavePrompt: () => void;
   onSavePrompt: () => void;
   onLoadPrompt: (text: string) => void;
@@ -1357,8 +1448,11 @@ function NanoLeftSidebar(props: {
   promptMode: 'simple' | 'advanced';
   canEnhancePrompt: boolean;
   canUndoPromptEnhance: boolean;
+  canRedoPromptHistory: boolean;
   canSavePrompt: boolean;
   isEnhancingPrompt: boolean;
+  isSemanticRemixing: boolean;
+  isGeneratingPromptVariants: boolean;
   enhanceError: string | null;
   savedPrompts: SavedPrompt[];
   isSavedPromptsOpen: boolean;
@@ -1369,10 +1463,16 @@ function NanoLeftSidebar(props: {
   onCloseSavePrompt: () => void;
   selectedSavedPromptId: string | null;
   canGenerate: boolean;
+  currentPrompt: string;
+  semanticReferencePrompt: string;
+  semanticMixSelection: Record<keyof PromptCategories, boolean>;
+  semanticPromptVariants: Array<{ variant: string; approach: string; prompt: string }>;
+  promptHistoryEntries: string[];
+  imageModelPresets: ImageModelPreset[];
   selectedModelId?: string;
   onModelSelect?: (modelId: string) => void;
 }) {
-  const imageModelPresets = IMAGE_MODEL_PRESETS;
+  const imageModelPresets = props.imageModelPresets;
   const referenceAssets = props.snapshot.assets.filter((asset) => asset.kind === 'reference');
   const originalAsset = props.snapshot.assets.find((asset) => asset.id === props.snapshot.project.originalAssetId);
   const headswapSourceAsset = props.snapshot.assets.find((asset) => asset.id === props.snapshot.headswapSourceAssetId);
@@ -1383,12 +1483,20 @@ function NanoLeftSidebar(props: {
   const [dragSection, setDragSection] = useState<'input' | 'style' | 'brand' | null>(null);
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
   const [isReferenceMenuOpen, setIsReferenceMenuOpen] = useState(false);
+  const [isAiPromptMenuOpen, setIsAiPromptMenuOpen] = useState(false);
+  const [aiPromptPanel, setAiPromptPanel] = useState<'enhance' | 'semantic' | 'variants' | 'history'>('semantic');
   const promptToolbarRef = useRef<HTMLDivElement | null>(null);
   const modelMenuRef = useRef<HTMLDivElement | null>(null);
   const referenceMenuRef = useRef<HTMLDivElement | null>(null);
+  const aiPromptMenuRef = useRef<HTMLDivElement | null>(null);
   const route = props.activeRoute;
   const selectedModel =
     imageModelPresets.find((preset) => preset.id === props.selectedModelId) ?? imageModelPresets[0];
+  const modelGroups = imageModelPresets.reduce<Record<string, ImageModelPreset[]>>((acc, preset) => {
+    if (!acc[preset.providerLabel]) acc[preset.providerLabel] = [];
+    acc[preset.providerLabel].push(preset);
+    return acc;
+  }, {});
   const referenceOptions = [
     { id: 'A', label: 'Authentic', description: 'Keeps the output natural and closest to the original feel.', icon: Sparkles },
     { id: 'B', label: 'Enhance', description: 'Adds more polish, clarity and commercial finish.', icon: BadgePlus },
@@ -1399,6 +1507,10 @@ function NanoLeftSidebar(props: {
     props.faceIdentityMode
       ? referenceOptions[3]
       : referenceOptions.find((option) => option.id === props.advancedVariant) ?? referenceOptions[2];
+  const semanticReferenceCategories = useMemo(
+    () => parsePromptToCategories(props.semanticReferencePrompt),
+    [props.semanticReferencePrompt],
+  );
 
   const handleFile = (fileList: FileList | File[], mode: 'input' | 'style' | 'brand' | 'source-face' | 'target-scene') => {
     const file = Array.from(fileList).find((item) => item.type.startsWith('image/'));
@@ -1496,6 +1608,20 @@ function NanoLeftSidebar(props: {
     return () => window.removeEventListener('pointerdown', handlePointerDown);
   }, [isReferenceMenuOpen]);
 
+  useEffect(() => {
+    if (!isAiPromptMenuOpen || typeof window === 'undefined') return;
+
+    const handlePointerDown = (event: MouseEvent | PointerEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (aiPromptMenuRef.current?.contains(target)) return;
+      setIsAiPromptMenuOpen(false);
+    };
+
+    window.addEventListener('pointerdown', handlePointerDown);
+    return () => window.removeEventListener('pointerdown', handlePointerDown);
+  }, [isAiPromptMenuOpen]);
+
   return (
     <aside className="nano-left-panel">
       <section className="nano-action-panel">
@@ -1542,25 +1668,35 @@ function NanoLeftSidebar(props: {
           </button>
           {isModelMenuOpen ? (
             <div className="nano-model-select-menu" role="listbox" aria-label="Model selection">
-              {imageModelPresets.map((preset) => {
-                const isActive = preset.id === selectedModel.id;
-                return (
-                  <button
-                    key={preset.id}
-                    type="button"
-                    className={isActive ? 'nano-model-select-option active' : 'nano-model-select-option'}
-                    onClick={() => {
-                      props.onModelSelect?.(preset.id);
-                      setIsModelMenuOpen(false);
-                    }}
-                    role="option"
-                    aria-selected={isActive}
-                  >
-                    <strong>{preset.title}</strong>
-                    <span>{preset.subtitle}</span>
-                  </button>
-                );
-              })}
+              {Object.entries(modelGroups).map(([providerLabel, models]) => (
+                <div key={providerLabel} className="nano-model-provider-group">
+                  <div className="nano-model-provider-head">
+                    <strong>{providerLabel}</strong>
+                    <span>
+                      {models[0]?.supportsGrounding ? 'Grounding' : 'No grounding'} · max {models[0]?.maxImages ?? 1}
+                    </span>
+                  </div>
+                  {models.map((preset) => {
+                    const isActive = preset.id === selectedModel.id;
+                    return (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        className={isActive ? 'nano-model-select-option active' : 'nano-model-select-option'}
+                        onClick={() => {
+                          props.onModelSelect?.(preset.id);
+                          setIsModelMenuOpen(false);
+                        }}
+                        role="option"
+                        aria-selected={isActive}
+                      >
+                        <strong>{preset.title}</strong>
+                        <span>{preset.subtitle}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
             </div>
           ) : null}
         </div>
@@ -1593,17 +1729,146 @@ function NanoLeftSidebar(props: {
                   className="nano-prompt-surface-textarea"
                 />
                 <div className="nano-prompt-surface-footer">
-                  <button
-                    type="button"
-                    className="nano-ai-prompt-button"
-                    disabled={!props.canEnhancePrompt || props.isEnhancingPrompt}
-                    onClick={props.onEnhancePrompt}
-                  >
-                    <span className="nano-ai-prompt-switch" aria-hidden="true">
-                      <i />
-                    </span>
-                    <span>{props.isEnhancingPrompt ? 'AI prompt...' : 'AI prompt'}</span>
-                  </button>
+                  <div className="nano-ai-prompt-wrap" ref={aiPromptMenuRef}>
+                    <button
+                      type="button"
+                      className="nano-ai-prompt-button"
+                      disabled={!props.canEnhancePrompt}
+                      onClick={() => setIsAiPromptMenuOpen((current) => !current)}
+                    >
+                      <span className="nano-ai-prompt-switch" aria-hidden="true">
+                        <i />
+                      </span>
+                      <span>{props.isEnhancingPrompt || props.isSemanticRemixing ? 'AI prompt...' : 'AI prompt'}</span>
+                    </button>
+                    {isAiPromptMenuOpen ? (
+                      <div className="nano-inline-prompt-popover nano-inline-prompt-popover--floating nano-ai-prompt-popover">
+                        <div className="nano-ai-prompt-tabs">
+                          {[
+                            { id: 'semantic', label: 'Semantic' },
+                            { id: 'variants', label: '3 variants' },
+                            { id: 'history', label: 'History' },
+                            { id: 'enhance', label: 'Enhance' },
+                          ].map((tab) => (
+                            <button
+                              key={tab.id}
+                              type="button"
+                              className={aiPromptPanel === tab.id ? 'active' : ''}
+                              onClick={() => setAiPromptPanel(tab.id as typeof aiPromptPanel)}
+                            >
+                              {tab.label}
+                            </button>
+                          ))}
+                        </div>
+
+                        {aiPromptPanel === 'enhance' ? (
+                          <div className="nano-ai-panel-section">
+                            <p>AI prompt vylepší stávající text bez změny významu.</p>
+                            <button
+                              type="button"
+                              className="nano-ai-panel-primary"
+                              disabled={!props.canEnhancePrompt || props.isEnhancingPrompt}
+                              onClick={props.onEnhancePrompt}
+                            >
+                              {props.isEnhancingPrompt ? 'Vylepšuji…' : 'Vylepšit prompt'}
+                            </button>
+                          </div>
+                        ) : null}
+
+                        {aiPromptPanel === 'semantic' ? (
+                          <div className="nano-ai-panel-section">
+                            <p>Vlož druhý prompt a vyber, které významové části chceš převzít.</p>
+                            <textarea
+                              value={props.semanticReferencePrompt}
+                              onChange={(event) => props.onSemanticReferencePromptChange(event.target.value)}
+                              placeholder="Reference prompt pro semantic remix"
+                              className="nano-ai-panel-textarea"
+                            />
+                            <div className="nano-ai-category-preview">
+                              {(Object.keys(CATEGORY_LABELS) as Array<keyof PromptCategories>)
+                                .filter((key) => semanticReferenceCategories[key].trim())
+                                .map((key) => (
+                                  <span key={key}>{CATEGORY_LABELS[key]}</span>
+                                ))}
+                            </div>
+                            <div className="nano-ai-mix-grid">
+                              {(Object.keys(CATEGORY_LABELS) as Array<keyof PromptCategories>).map((key) => (
+                                <button
+                                  key={key}
+                                  type="button"
+                                  className={props.semanticMixSelection[key] ? 'active' : ''}
+                                  onClick={() => props.onToggleSemanticMixCategory(key)}
+                                >
+                                  {CATEGORY_LABELS[key]}
+                                </button>
+                              ))}
+                            </div>
+                            <button
+                              type="button"
+                              className="nano-ai-panel-primary"
+                              disabled={!props.currentPrompt.trim() || !props.semanticReferencePrompt.trim() || props.isSemanticRemixing}
+                              onClick={props.onRunSemanticPromptRemix}
+                            >
+                              {props.isSemanticRemixing ? 'Míchám…' : 'Použít semantic remix'}
+                            </button>
+                          </div>
+                        ) : null}
+
+                        {aiPromptPanel === 'variants' ? (
+                          <div className="nano-ai-panel-section">
+                            <div className="nano-ai-panel-headline">
+                              <p>Vygeneruj 3 alternativní formulace promptu a jedním klikem je vlož.</p>
+                              <button
+                                type="button"
+                                className="nano-ai-panel-secondary"
+                                disabled={!props.currentPrompt.trim() || props.isGeneratingPromptVariants}
+                                onClick={props.onGeneratePromptVariants}
+                              >
+                                {props.isGeneratingPromptVariants ? 'Generuji…' : 'Vytvořit varianty'}
+                              </button>
+                            </div>
+                            <div className="nano-ai-variants-list">
+                              {props.semanticPromptVariants.length ? (
+                                props.semanticPromptVariants.map((variant) => (
+                                  <button key={variant.variant} type="button" className="nano-ai-variant-card" onClick={() => props.onApplyPromptVariant(variant.prompt)}>
+                                    <strong>{variant.variant}</strong>
+                                    <span>{variant.approach}</span>
+                                    <p>{variant.prompt}</p>
+                                  </button>
+                                ))
+                              ) : (
+                                <p className="nano-ai-panel-empty">Zatím tu nejsou vygenerované varianty.</p>
+                              )}
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {aiPromptPanel === 'history' ? (
+                          <div className="nano-ai-panel-section">
+                            <div className="nano-ai-history-actions">
+                              <button type="button" className="nano-ai-panel-secondary" disabled={!props.canUndoPromptEnhance} onClick={props.onUndoPromptEnhance}>
+                                Zpět
+                              </button>
+                              <button type="button" className="nano-ai-panel-secondary" disabled={!props.canRedoPromptHistory} onClick={props.onRedoPromptHistory}>
+                                Znovu
+                              </button>
+                            </div>
+                            <div className="nano-ai-history-list">
+                              {props.promptHistoryEntries.length ? (
+                                props.promptHistoryEntries.map((entry, index) => (
+                                  <button key={`${index}-${entry.slice(0, 12)}`} type="button" className="nano-ai-history-card" onClick={() => props.onLoadPrompt(entry)}>
+                                    <p>{entry}</p>
+                                  </button>
+                                ))
+                              ) : (
+                                <p className="nano-ai-panel-empty">Historie promptu je zatím prázdná.</p>
+                              )}
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
                   <div className="nano-prompt-tools-row" ref={promptToolbarRef}>
                     <button
                       type="button"
@@ -2643,7 +2908,6 @@ export function ProjectWorkspace(props: {
   const [workspace, setWorkspace] = useState(() => createWorkspaceState(snapshot));
   const [isGenerating, setIsGenerating] = useState(false);
   const [workspaceNote, setWorkspaceNote] = useState('Pokracuj z aktivni verze a branchuj dalsi smery bez ztraty historie.');
-  const [previousPromptBeforeEnhance, setPreviousPromptBeforeEnhance] = useState<{ route: NanoRoute; value: string } | null>(null);
   const [isEnhancing, setIsEnhancing] = useState(false);
   const [enhanceError, setEnhanceError] = useState<string | null>(null);
   const [promptMode, setPromptMode] = useState<'simple' | 'advanced'>('simple');
@@ -2656,6 +2920,12 @@ export function ProjectWorkspace(props: {
   const [savedPromptDraftName, setSavedPromptDraftName] = useState('');
   const [selectedSavedPromptId, setSelectedSavedPromptId] = useState<string | null>(null);
   const [selectedModelId, setSelectedModelId] = useState<string>('gemini-flash');
+  const [imageModelPresets, setImageModelPresets] = useState<ImageModelPreset[]>(FALLBACK_IMAGE_MODEL_PRESETS);
+  const [semanticReferencePrompt, setSemanticReferencePrompt] = useState('');
+  const [semanticMixSelection, setSemanticMixSelection] = useState<Record<keyof PromptCategories, boolean>>(DEFAULT_SEMANTIC_MIX);
+  const [semanticPromptVariants, setSemanticPromptVariants] = useState<Array<{ variant: string; approach: string; prompt: string }>>([]);
+  const [isGeneratingPromptVariants, setIsGeneratingPromptVariants] = useState(false);
+  const [isSemanticRemixing, setIsSemanticRemixing] = useState(false);
   const deletedVersionIdsRef = useRef<Set<string>>(new Set());
   const deletedJobIdsRef = useRef<Set<string>>(new Set());
   const promptHistoryRef = useRef<Record<NanoRoute, PromptHistory>>({
@@ -2692,10 +2962,31 @@ export function ProjectWorkspace(props: {
   const getPromptHistory = (route: NanoRoute) => promptHistoryRef.current[route];
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const savedModelId = window.localStorage.getItem(SELECTED_IMAGE_MODEL_STORAGE_KEY);
-    const nextModel = IMAGE_MODEL_PRESETS.find((preset) => preset.id === savedModelId)?.id ?? 'gemini-flash';
-    setSelectedModelId(nextModel);
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const response = await api.getProviderCatalog();
+        if (cancelled) return;
+        const nextPresets = mapProviderCatalogToModelPresets(response.providers);
+        if (nextPresets.length) {
+          setImageModelPresets(nextPresets);
+          const savedModelId =
+            typeof window !== 'undefined' ? window.localStorage.getItem(SELECTED_IMAGE_MODEL_STORAGE_KEY) : null;
+          const nextModel = nextPresets.find((preset) => preset.id === savedModelId)?.id ?? nextPresets[0].id;
+          setSelectedModelId(nextModel);
+        }
+      } catch {
+        if (typeof window === 'undefined' || cancelled) return;
+        const savedModelId = window.localStorage.getItem(SELECTED_IMAGE_MODEL_STORAGE_KEY);
+        const nextModel = FALLBACK_IMAGE_MODEL_PRESETS.find((preset) => preset.id === savedModelId)?.id ?? FALLBACK_IMAGE_MODEL_PRESETS[0].id;
+        setSelectedModelId(nextModel);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const syncWorkspaceFromApi = async () => {
@@ -2771,34 +3062,64 @@ export function ProjectWorkspace(props: {
   }, [props.apiConfig, props.loadingError]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      const raw = window.localStorage.getItem(SAVED_PROMPTS_STORAGE_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as Array<Partial<SavedPrompt> & { prompt?: string }>;
-      if (Array.isArray(parsed)) {
-        const normalized = parsed
-          .filter((item) => item && typeof item.id === 'string' && (typeof item.text === 'string' || typeof item.prompt === 'string'))
-          .map((item) => {
-            const id = String(item.id);
-            const text = typeof item.text === 'string' ? item.text : String(item.prompt ?? '');
-            const name =
-              typeof item.name === 'string' && item.name.trim()
-                ? item.name.trim()
-                : text.slice(0, 36).trim() || 'Ulozeny prompt';
-            return {
-              id,
-              name,
-              text,
-              createdAt: typeof item.createdAt === 'string' ? item.createdAt : new Date().toISOString(),
-            };
-          });
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const response = await api.getSavedPrompts();
+        let normalized = response.prompts.map(normalizeSavedPromptRecord);
+
+        if (!normalized.length && typeof window !== 'undefined') {
+          try {
+            const raw = window.localStorage.getItem(SAVED_PROMPTS_STORAGE_KEY);
+            const parsed = raw ? (JSON.parse(raw) as Array<Partial<SavedPrompt> & { prompt?: string }>) : [];
+            const legacy = Array.isArray(parsed)
+              ? parsed
+                  .filter((item) => item && typeof item.id === 'string' && (typeof item.text === 'string' || typeof item.prompt === 'string'))
+                  .map(normalizeLegacySavedPromptRecord)
+              : [];
+            if (legacy.length) {
+              await Promise.all(
+                legacy.map((prompt) =>
+                  api.saveSavedPrompt({
+                    id: prompt.id,
+                    name: prompt.name,
+                    prompt: prompt.text,
+                    category: prompt.category,
+                  }),
+                ),
+              );
+              normalized = legacy;
+            }
+          } catch {
+            // Ignore legacy migration failures and keep UI running.
+          }
+        }
+
+        if (cancelled) return;
         setSavedPrompts(normalized);
         setSelectedSavedPromptId(normalized[0]?.id ?? null);
+      } catch {
+        if (typeof window === 'undefined' || cancelled) return;
+        try {
+          const raw = window.localStorage.getItem(SAVED_PROMPTS_STORAGE_KEY);
+          const parsed = raw ? (JSON.parse(raw) as Array<Partial<SavedPrompt> & { prompt?: string }>) : [];
+          const normalized = Array.isArray(parsed)
+            ? parsed
+                .filter((item) => item && typeof item.id === 'string' && (typeof item.text === 'string' || typeof item.prompt === 'string'))
+                .map(normalizeLegacySavedPromptRecord)
+            : [];
+          setSavedPrompts(normalized);
+          setSelectedSavedPromptId(normalized[0]?.id ?? null);
+        } catch {
+          // Keep UI usable even if local storage contains invalid data.
+        }
       }
-    } catch {
-      // Keep UI usable even if localStorage contains invalid data.
-    }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -2864,6 +3185,10 @@ export function ProjectWorkspace(props: {
     }
   };
 
+  const activePromptHistory = getPromptHistory(props.activeRoute);
+  const currentPromptValue = getPromptValueForRoute(props.activeRoute, workspace);
+  const promptHistoryEntries = [...activePromptHistory.getAll()].reverse();
+
   const setPromptValueForRoute = (route: NanoRoute, value: string, options?: { addToHistory?: boolean }) => {
     if (options?.addToHistory !== false) {
       getPromptHistory(route).add(value);
@@ -2899,7 +3224,6 @@ export function ProjectWorkspace(props: {
 
     try {
       const response = await api.enhancePrompt({ prompt: currentPrompt });
-      setPreviousPromptBeforeEnhance({ route, value: currentPrompt });
       setPromptValueForRoute(route, response.prompt);
     } catch (error) {
       setEnhanceError(error instanceof Error ? 'Prompt se nepodarilo vylepsit.' : 'Prompt se nepodarilo vylepsit.');
@@ -2909,9 +3233,16 @@ export function ProjectWorkspace(props: {
   };
 
   const handleUndoPromptEnhance = () => {
-    if (!previousPromptBeforeEnhance || previousPromptBeforeEnhance.route !== props.activeRoute) return;
-    setPromptValueForRoute(previousPromptBeforeEnhance.route, previousPromptBeforeEnhance.value);
-    setPreviousPromptBeforeEnhance(null);
+    const previous = getPromptHistory(props.activeRoute).undo();
+    if (!previous) return;
+    setPromptValueForRoute(props.activeRoute, previous, { addToHistory: false });
+    setEnhanceError(null);
+  };
+
+  const handleRedoPromptHistory = () => {
+    const next = getPromptHistory(props.activeRoute).redo();
+    if (!next) return;
+    setPromptValueForRoute(props.activeRoute, next, { addToHistory: false });
     setEnhanceError(null);
   };
 
@@ -2927,24 +3258,27 @@ export function ProjectWorkspace(props: {
     setEnhanceError(null);
   };
 
-  const handleSavePrompt = () => {
+  const handleSavePrompt = async () => {
     const text = getPromptValueForRoute(props.activeRoute, workspace).trim();
     const name = savedPromptDraftName.trim();
     if (!text || !name) {
       setEnhanceError('Prompt i nazev musi byt vyplnene.');
       return;
     }
-    const nextPrompt: SavedPrompt = {
-      id: `prompt-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      name,
-      text,
-      createdAt: new Date().toISOString(),
-    };
-    persistSavedPrompts([nextPrompt, ...savedPrompts]);
-    setEnhanceError(null);
-    setIsSavedPromptsOpen(false);
-    setIsSavePromptOpen(false);
-    setSavedPromptDraftName('');
+    try {
+      const response = await api.saveSavedPrompt({
+        name,
+        prompt: text,
+      });
+      const nextPrompt = normalizeSavedPromptRecord(response.prompt);
+      persistSavedPrompts([nextPrompt, ...savedPrompts.filter((prompt) => prompt.id !== nextPrompt.id)]);
+      setEnhanceError(null);
+      setIsSavedPromptsOpen(false);
+      setIsSavePromptOpen(false);
+      setSavedPromptDraftName('');
+    } catch {
+      setEnhanceError('Prompt se nepodařilo uložit.');
+    }
   };
 
   const handleLoadPrompt = (text: string) => {
@@ -2960,6 +3294,57 @@ export function ProjectWorkspace(props: {
 
   const handleDeletePrompt = (id: string) => {
     persistSavedPrompts(savedPrompts.filter((prompt) => prompt.id !== id));
+    void api.deleteSavedPrompt(id);
+  };
+
+  const handleGeneratePromptVariants = async () => {
+    const currentPrompt = getPromptValueForRoute(props.activeRoute, workspace).trim();
+    if (!currentPrompt) {
+      setEnhanceError('Nejdřív napiš prompt.');
+      return;
+    }
+
+    setIsGeneratingPromptVariants(true);
+    setEnhanceError(null);
+
+    try {
+      const response = await api.generatePromptVariants({ prompt: currentPrompt });
+      setSemanticPromptVariants(response.variants);
+    } catch {
+      setEnhanceError('Varianty promptu se nepodařilo vygenerovat.');
+    } finally {
+      setIsGeneratingPromptVariants(false);
+    }
+  };
+
+  const handleToggleSemanticMixCategory = (key: keyof PromptCategories) => {
+    setSemanticMixSelection((current) => ({ ...current, [key]: !current[key] }));
+  };
+
+  const handleRunSemanticPromptRemix = async () => {
+    const promptA = getPromptValueForRoute(props.activeRoute, workspace).trim();
+    const promptB = semanticReferencePrompt.trim();
+    if (!promptA || !promptB) {
+      setEnhanceError('Vyplň hlavní i referenční prompt.');
+      return;
+    }
+
+    const mix = Object.entries(semanticMixSelection).reduce<Record<string, 'A' | 'B'>>((acc, [key, value]) => {
+      acc[key] = value ? 'B' : 'A';
+      return acc;
+    }, {});
+
+    setIsSemanticRemixing(true);
+    setEnhanceError(null);
+
+    try {
+      const response = await api.remixPrompt({ promptA, promptB, mix });
+      setPromptValueForRoute(props.activeRoute, response.prompt);
+    } catch {
+      setEnhanceError('Semantic remix se nepodařilo vytvořit.');
+    } finally {
+      setIsSemanticRemixing(false);
+    }
   };
 
   const setVariantCount = (value: number) => {
@@ -5333,6 +5718,12 @@ export function ProjectWorkspace(props: {
           canGenerate={canGenerate}
           onEnhancePrompt={handleEnhancePrompt}
           onUndoPromptEnhance={handleUndoPromptEnhance}
+          onRedoPromptHistory={handleRedoPromptHistory}
+          onGeneratePromptVariants={handleGeneratePromptVariants}
+          onApplyPromptVariant={(prompt) => setPromptValueForRoute(props.activeRoute, prompt)}
+          onSemanticReferencePromptChange={setSemanticReferencePrompt}
+          onToggleSemanticMixCategory={handleToggleSemanticMixCategory}
+          onRunSemanticPromptRemix={handleRunSemanticPromptRemix}
           onOpenSavePrompt={handleOpenSavePrompt}
           onSavePrompt={handleSavePrompt}
           onLoadPrompt={handleLoadPrompt}
@@ -5344,10 +5735,13 @@ export function ProjectWorkspace(props: {
           advancedVariant={advancedVariant}
           faceIdentityMode={faceIdentityMode}
           promptMode={promptMode}
-          canEnhancePrompt={Boolean(getPromptValueForRoute(props.activeRoute, workspace).trim())}
-          canUndoPromptEnhance={Boolean(previousPromptBeforeEnhance && previousPromptBeforeEnhance.route === props.activeRoute)}
-          canSavePrompt={Boolean(getPromptValueForRoute(props.activeRoute, workspace).trim())}
+          canEnhancePrompt={Boolean(currentPromptValue.trim())}
+          canUndoPromptEnhance={activePromptHistory.canUndo()}
+          canRedoPromptHistory={activePromptHistory.canRedo()}
+          canSavePrompt={Boolean(currentPromptValue.trim())}
           isEnhancingPrompt={isEnhancing}
+          isSemanticRemixing={isSemanticRemixing}
+          isGeneratingPromptVariants={isGeneratingPromptVariants}
           enhanceError={enhanceError}
           savedPrompts={savedPrompts}
           isSavedPromptsOpen={isSavedPromptsOpen}
@@ -5361,6 +5755,12 @@ export function ProjectWorkspace(props: {
           onSavedPromptDraftNameChange={setSavedPromptDraftName}
           onCloseSavePrompt={() => setIsSavePromptOpen(false)}
           selectedSavedPromptId={selectedSavedPromptId}
+          currentPrompt={currentPromptValue}
+          semanticReferencePrompt={semanticReferencePrompt}
+          semanticMixSelection={semanticMixSelection}
+          semanticPromptVariants={semanticPromptVariants}
+          promptHistoryEntries={promptHistoryEntries}
+          imageModelPresets={imageModelPresets}
           selectedModelId={selectedModelId}
           onModelSelect={setSelectedModelId}
         />

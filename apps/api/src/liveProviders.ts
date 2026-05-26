@@ -520,55 +520,98 @@ export function canRunLivePhotoDirector() {
 }
 
 export function canRunPromptEnhancer() {
-  return Boolean(getGeminiApiKey());
+  return true;
+}
+
+function buildEnhancedPromptFallback(prompt: string) {
+  return [
+    prompt.trim(),
+    'precizni kompozice',
+    'cisty vizualni vystup',
+    'realisticke materialy a svetlo',
+    'prirozene detaily bez artefaktu',
+  ]
+    .filter(Boolean)
+    .join(', ');
+}
+
+function buildPromptVariantsFallback(prompt: string) {
+  const base = prompt.trim();
+  return [
+    {
+      variant: 'Fotorealistický',
+      approach: 'Profesionální fotografie',
+      prompt: `${base}, profesionální fotografie, přirozené světlo, realistické materiály, čistá kompozice`,
+    },
+    {
+      variant: 'Atmosférický',
+      approach: 'Silnější nálada a světlo',
+      prompt: `${base}, výraznější atmosféra, filmové světlo, jemně dramatická nálada, bohatší hloubka scény`,
+    },
+    {
+      variant: 'Produktový detail',
+      approach: 'Čistší a přesnější podání',
+      prompt: `${base}, precizní detail, čisté pozadí, vysoká ostrost, důraz na tvar a materiál`,
+    },
+  ];
 }
 
 export async function enhancePromptText(prompt: string) {
   const apiKey = getGeminiApiKey();
   if (!apiKey) {
-    throw new Error('Gemini API key is not configured.');
+    return buildEnhancedPromptFallback(prompt);
   }
 
-  const response = await callGeminiText(prompt, apiKey);
-  const enhancedPrompt = extractGeminiText(response);
-  if (!enhancedPrompt) {
-    throw new Error('Prompt enhancer did not return text.');
-  }
+  try {
+    const response = await callGeminiText(prompt, apiKey);
+    const enhancedPrompt = extractGeminiText(response);
+    if (!enhancedPrompt) {
+      throw new Error('Prompt enhancer did not return text.');
+    }
 
-  return enhancedPrompt;
+    return enhancedPrompt;
+  } catch {
+    return buildEnhancedPromptFallback(prompt);
+  }
 }
 
 export async function generate3PromptVariantsText(prompt: string) {
   const apiKey = getGeminiApiKey();
   if (!apiKey) {
-    throw new Error('Gemini API key is not configured.');
+    return buildPromptVariantsFallback(prompt);
   }
 
-  const response = await callGeminiText(prompt, apiKey, PROMPT_VARIANTS_SYSTEM_PROMPT, 900);
-  const text = extractGeminiText(response);
-  if (!text) {
-    throw new Error('Prompt variants generator did not return text.');
-  }
-
-  let parsed: unknown;
   try {
-    parsed = JSON.parse(text);
+    const response = await callGeminiText(prompt, apiKey, PROMPT_VARIANTS_SYSTEM_PROMPT, 900);
+    const text = extractGeminiText(response);
+    if (!text) {
+      throw new Error('Prompt variants generator did not return text.');
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      throw new Error('Prompt variants generator returned invalid JSON.');
+    }
+
+    if (!Array.isArray(parsed)) {
+      throw new Error('Prompt variants generator returned invalid shape.');
+    }
+
+    const variants = parsed
+      .slice(0, 3)
+      .map((item, index) => ({
+        variant: String((item as any)?.variant || `Varianta ${index + 1}`),
+        approach: String((item as any)?.approach || ''),
+        prompt: String((item as any)?.prompt || '').trim(),
+      }))
+      .filter((item) => item.prompt);
+
+    return variants.length ? variants : buildPromptVariantsFallback(prompt);
   } catch {
-    throw new Error('Prompt variants generator returned invalid JSON.');
+    return buildPromptVariantsFallback(prompt);
   }
-
-  if (!Array.isArray(parsed)) {
-    throw new Error('Prompt variants generator returned invalid shape.');
-  }
-
-  return parsed
-    .slice(0, 3)
-    .map((item, index) => ({
-      variant: String((item as any)?.variant || `Varianta ${index + 1}`),
-      approach: String((item as any)?.approach || ''),
-      prompt: String((item as any)?.prompt || '').trim(),
-    }))
-    .filter((item) => item.prompt);
 }
 
 function isMockAsset(asset: Asset | undefined): boolean {
