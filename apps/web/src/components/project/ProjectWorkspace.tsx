@@ -1,5 +1,5 @@
 import { startTransition, useEffect, useRef, useState, useMemo } from 'react';
-import { ArrowLeft, BadgePlus, BookOpen, ChevronDown, Download, Flower2, FolderClosed, Grid2x2, ImageIcon, ImagePlus, ImageUp, List, PanelRight, PencilLine, RefreshCw, Save, Sparkles, Square, Trash2, UserRound, X } from 'lucide-react';
+import { ArrowLeft, BadgePlus, ChevronDown, Download, Flower2, FolderClosed, Grid2x2, ImageIcon, ImagePlus, ImageUp, List, PanelRight, PencilLine, RefreshCw, Save, Sparkles, Square, Trash2, UserRound, X } from 'lucide-react';
 import type {
   Asset,
   EditStep,
@@ -685,18 +685,10 @@ function MainCanvas(props: {
               <section className="nano-main-results-stage nano-main-results-stage--feed">
                 <header className="nano-creations-toolbar">
                   <nav className="nano-creations-tabs" aria-label="Creations navigation">
-                    <button type="button" className="active">
+                    <div className="active" aria-current="page">
                       <Sparkles size={14} />
                       <span>Creations</span>
-                    </button>
-                    <button type="button">
-                      <Grid2x2 size={14} />
-                      <span>My templates</span>
-                    </button>
-                    <button type="button">
-                      <BookOpen size={14} />
-                      <span>Academy</span>
-                    </button>
+                    </div>
                   </nav>
                   {/* Right side — Magnific: bg-default-0 relative flex h-8 items-center gap-1 rounded-lg pl-1 pr-2 */}
                   <div className="nano-creations-layout-switcher">
@@ -1467,6 +1459,8 @@ function NanoLeftSidebar(props: {
   onHeadswapTargetUpload: (file: File) => void;
   onSelectExistingAsset: (asset: Asset, slot: 'input' | 'style' | 'brand' | 'source-face' | 'target-scene') => void;
   onOutputCountChange: (value: number) => void;
+  onGenerateAllModels: () => void;
+  onGeneratePromptVariantsBatch: () => void;
   onVariantCountChange: (value: number) => void;
   onVariantIntensityChange: (value: 'jemne' | 'stredne' | 'odvazne') => void;
   onMultiAngleSetTypeChange: (value: 'produktova' | 'interier' | 'lifestyle' | 'social') => void;
@@ -1610,6 +1604,8 @@ function NanoLeftSidebar(props: {
   });
   const commandConfig = getRouteCommandConfig(props.snapshot, route, {
     onOutputCountChange: props.onOutputCountChange,
+    onGenerateAllModels: props.onGenerateAllModels,
+    onGeneratePromptVariantsBatch: props.onGeneratePromptVariantsBatch,
     onVariantCountChange: props.onVariantCountChange,
     onVariantIntensityChange: props.onVariantIntensityChange,
     onMultiAngleShotCountChange: props.onMultiAngleShotCountChange,
@@ -2360,6 +2356,8 @@ function getRouteCommandConfig(
   route: NanoRoute,
   actions: {
     onOutputCountChange: (value: number) => void;
+    onGenerateAllModels: () => void;
+    onGeneratePromptVariantsBatch: () => void;
     onVariantCountChange: (value: number) => void;
     onVariantIntensityChange: (value: 'jemne' | 'stredne' | 'odvazne') => void;
     onMultiAngleShotCountChange: (value: number) => void;
@@ -2382,8 +2380,8 @@ function getRouteCommandConfig(
         primaryMeta: `${snapshot.photoDirectorOutputCount} vystupu`,
         loadingLabel: 'Generuji...',
         quickActions: [
-          { label: 'gen/all models', meta: '', onClick: () => actions.onOutputCountChange(5) },
-          { label: 'var/prompts', meta: '', onClick: () => actions.onOutputCountChange(3) },
+          { label: 'gen/all models', meta: '', onClick: actions.onGenerateAllModels },
+          { label: 'var/prompts', meta: '', onClick: actions.onGeneratePromptVariantsBatch },
         ],
         optionRowLabel: 'Image count',
         optionRow: [1, 2, 3, 4, 5].map((value) => ({
@@ -3732,6 +3730,89 @@ export function ProjectWorkspace(props: {
     });
   };
 
+  const buildPhotoDirectorJobInput = (options: {
+    instruction: string;
+    outputCount: number;
+    modelId?: string;
+    sourceVersionId?: string;
+    referenceAssetIds?: string[];
+  }) => {
+    const sourceVersion = options.sourceVersionId
+      ? workspace.versions.find((version) => version.id === options.sourceVersionId)
+      : undefined;
+    const originalAsset = workspace.assets.find((asset) => asset.id === workspace.project.originalAssetId);
+    const effectiveReferenceAssetIds = options.referenceAssetIds ?? workspace.visualCanon.referenceAssetIds;
+    const useSourceImage = options.sourceVersionId ? true : Boolean(originalAsset && !isMockLikeAsset(originalAsset));
+    const useReferenceImages = effectiveReferenceAssetIds
+      .map((assetId) => workspace.assets.find((asset) => asset.id === assetId))
+      .some((asset) => asset?.kind === 'reference' && !isMockLikeAsset(asset));
+    const aspectRatio = options.sourceVersionId
+      ? ((sourceVersion?.metadata?.aspectRatio as 'original' | 'square' | 'portrait' | 'landscape' | undefined) ?? 'original')
+      : resolvePhotoDirectorAspectRatio(useSourceImage);
+
+    return {
+      projectId: workspace.project.id,
+      instruction: options.instruction,
+      lockedText: workspace.photoDirectorLockedText,
+      outputCount: options.outputCount,
+      aspectRatio,
+      polishMode: workspace.photoDirectorPolishMode,
+      promptMode,
+      simpleLinkMode,
+      advancedVariant,
+      faceIdentityMode,
+      sourceVersionId: useSourceImage ? (options.sourceVersionId ?? workspace.project.activeVersionId) : undefined,
+      useSourceImage,
+      useReferenceImages,
+      temporaryReferenceAssetIds: options.referenceAssetIds?.length ? options.referenceAssetIds : undefined,
+      modelId: options.modelId ?? selectedModelId,
+    } satisfies Parameters<typeof api.createPhotoDirectorJob>[0];
+  };
+
+  const runPhotoDirectorBatch = async (
+    jobs: Array<{
+      instruction: string;
+      outputCount: number;
+      modelId?: string;
+      sourceVersionId?: string;
+      referenceAssetIds?: string[];
+      progressLabel: string;
+    }>,
+    messages: {
+      start: string;
+      success: string;
+      partial: string;
+    },
+  ) => {
+    setIsGenerating(true);
+    setWorkspaceNote(messages.start);
+
+    try {
+      let successCount = 0;
+      for (let index = 0; index < jobs.length; index += 1) {
+        const item = jobs[index];
+        const createdJob = await api.createPhotoDirectorJob(buildPhotoDirectorJobInput(item));
+        const finalJob = await waitForJob(createdJob.id, (progressJob) => {
+          setWorkspaceNote(`${item.progressLabel} ${index + 1}/${jobs.length}: ${progressJob.progress}%`);
+        });
+        if (finalJob.status === 'succeeded') {
+          successCount += 1;
+        } else {
+          setWorkspaceNote(`${item.progressLabel} ${index + 1}/${jobs.length} skoncil ve stavu ${finalJob.status}.`);
+        }
+      }
+
+      await syncWorkspaceFromApi();
+      setWorkspaceNote(successCount === jobs.length ? messages.success : messages.partial.replace('{count}', String(successCount)));
+      return successCount;
+    } catch (error) {
+      setWorkspaceNote(error instanceof Error ? error.message : 'Batch generovani selhal.');
+      return null;
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
   const handleUploadImage = async (file: File) => {
     if (props.apiConfig?.features.inlineUpload) {
       try {
@@ -4092,33 +4173,16 @@ export function ProjectWorkspace(props: {
 
   const handleGenerate = async () => {
     if (props.activeRoute === 'mulen' && props.apiConfig?.features.photoDirector) {
-      const originalAsset = workspace.assets.find((asset) => asset.id === workspace.project.originalAssetId);
-      const useSourceImage = Boolean(originalAsset && !isMockLikeAsset(originalAsset));
-      const useReferenceImages = workspace.visualCanon.referenceAssetIds
-        .map((assetId) => workspace.assets.find((asset) => asset.id === assetId))
-        .some((asset) => asset?.kind === 'reference' && !isMockLikeAsset(asset));
-      const nextAspectRatio = resolvePhotoDirectorAspectRatio(useSourceImage);
-
       setIsGenerating(true);
       setWorkspaceNote('Photo Director odesila zadani do backend job systemu a ceka na novou verzi.');
 
       try {
-        const job = await api.createPhotoDirectorJob({
-          projectId: workspace.project.id,
-          instruction: workspace.photoDirectorInstruction,
-          lockedText: workspace.photoDirectorLockedText,
-          outputCount: workspace.photoDirectorOutputCount,
-          aspectRatio: nextAspectRatio,
-          polishMode: workspace.photoDirectorPolishMode,
-          promptMode,
-          simpleLinkMode,
-          advancedVariant,
-          faceIdentityMode,
-          sourceVersionId: useSourceImage ? workspace.project.activeVersionId : undefined,
-          useSourceImage,
-          useReferenceImages,
-          modelId: selectedModelId,
-        });
+        const job = await api.createPhotoDirectorJob(
+          buildPhotoDirectorJobInput({
+            instruction: workspace.photoDirectorInstruction,
+            outputCount: workspace.photoDirectorOutputCount,
+          }),
+        );
 
         const finalJob = await waitForJob(job.id, (progressJob) => {
           setWorkspaceNote(`Photo Director bezi: ${progressJob.progress}%`);
@@ -4283,6 +4347,76 @@ export function ProjectWorkspace(props: {
         setIsGenerating(false);
       });
     }, 900);
+  };
+
+  const handleGenerateAllModels = async () => {
+    if (props.activeRoute !== 'mulen' || !props.apiConfig?.features.photoDirector || isGenerating) return;
+
+    const instruction = workspace.photoDirectorInstruction.trim();
+    if (!instruction) {
+      setWorkspaceNote('Nejdřív napiš prompt pro gen/all models.');
+      return;
+    }
+
+    const liveModelPresets = imageModelPresets.filter((preset) =>
+      providerCatalog.some((provider) => provider.id === preset.provider && provider.models.some((model) => model.id === preset.id)),
+    );
+
+    if (!liveModelPresets.length) {
+      setWorkspaceNote('Pro gen/all models teď není dostupný žádný aktivní model.');
+      return;
+    }
+
+    await runPhotoDirectorBatch(
+      liveModelPresets.map((preset) => ({
+        instruction,
+        outputCount: 1,
+        modelId: preset.id,
+        progressLabel: `Model ${preset.title}`,
+      })),
+      {
+        start: 'Photo Director spousti gen/all models pres vsechny aktivni modely.',
+        success: `Gen/all models dokoncen. Vzniklo ${liveModelPresets.length} samostatnych behu.`,
+        partial: 'Gen/all models skoncil jen castecne. Dokonceno bylo {count} behu.',
+      },
+    );
+  };
+
+  const handleGeneratePromptVariantsBatch = async () => {
+    if (props.activeRoute !== 'mulen' || !props.apiConfig?.features.photoDirector || isGenerating) return;
+
+    const instruction = workspace.photoDirectorInstruction.trim();
+    if (!instruction) {
+      setWorkspaceNote('Nejdřív napiš prompt pro var/prompts.');
+      return;
+    }
+
+    setWorkspaceNote('Photo Director pripravuje prompt varianty pro var/prompts.');
+
+    try {
+      const response = await api.generatePromptVariants({ prompt: instruction });
+      const variants = response.variants.slice(0, 3);
+
+      if (!variants.length) {
+        setWorkspaceNote('Var/prompts nevratil zadne pouzitelne prompt varianty.');
+        return;
+      }
+
+      await runPhotoDirectorBatch(
+        variants.map((variant, index) => ({
+          instruction: variant.prompt,
+          outputCount: 1,
+          progressLabel: `Varianta ${variant.variant || index + 1}`,
+        })),
+        {
+          start: 'Photo Director spousti var/prompts pres tri prompt varianty.',
+          success: `Var/prompts dokoncen. Vznikly ${variants.length} variantove behy.`,
+          partial: 'Var/prompts skoncil jen castecne. Dokonceno bylo {count} behu.',
+        },
+      );
+    } catch (error) {
+      setWorkspaceNote(error instanceof Error ? error.message : 'Var/prompts se nepodařilo připravit.');
+    }
   };
 
   const handleRegenerateFromCanvas = async (sourceVersionId: string, prompt: string, referenceAssetIds: string[] = []) => {
@@ -5840,6 +5974,8 @@ export function ProjectWorkspace(props: {
           onHeadswapTargetUpload={handleHeadswapTargetUpload}
           onSelectExistingAsset={handleSelectExistingAsset}
           onOutputCountChange={setOutputCount}
+          onGenerateAllModels={handleGenerateAllModels}
+          onGeneratePromptVariantsBatch={handleGeneratePromptVariantsBatch}
           onVariantCountChange={setVariantCount}
           onVariantIntensityChange={setVariantIntensity}
           onMultiAngleSetTypeChange={setMultiAngleSetType}
