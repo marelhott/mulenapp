@@ -4,8 +4,11 @@ import cors from '@fastify/cors';
 import type { Asset, GenerationJob, MulenModule } from '@mulen/shared';
 import { mockWorkspaceSnapshot } from '@mulen/shared';
 import { processJob, processQueuedJobsOnce } from './mockEngine.js';
-import { canRunPromptEnhancer, enhancePromptText } from './liveProviders.js';
+import { canRunPromptEnhancer, enhancePromptText, generate3PromptVariantsText } from './liveProviders.js';
 import { canUseMulenPersistence, getMulenPersistencePublicStatus } from './mulenPersistence.js';
+import { PROVIDER_CATALOG } from './providerCatalog.js';
+import { semanticRemix } from './promptRemix.js';
+import { deleteCollectionStore, deleteSavedPromptStore, listCollectionsStore, listSavedPromptsStore, upsertCollectionStore, upsertSavedPromptStore } from './libraryStore.js';
 import { canUseSupabaseStorage, persistSavedImageMetadata, uploadDataUrlToSupabase } from './supabaseStorage.js';
 import { readStore, resetStore, updateStore } from './store.js';
 import { resolve, dirname } from 'node:path';
@@ -32,6 +35,7 @@ type CreateJobBody = {
   aspectRatio?: 'original' | 'square' | 'portrait' | 'landscape';
   polishMode?: 'focused' | 'balanced' | 'bold';
   sourceVersionId?: string;
+  temporaryReferenceAssetIds?: string[];
   input?: Record<string, unknown>;
   [key: string]: unknown;
 };
@@ -54,6 +58,31 @@ type CreateExportBody = {
 
 type EnhancePromptBody = {
   prompt?: string;
+};
+
+type PromptVariantsBody = {
+  prompt?: string;
+};
+
+type PromptRemixBody = {
+  promptA?: string;
+  promptB?: string;
+  mix?: Record<string, 'A' | 'B'>;
+};
+
+type SavedPromptBody = {
+  id?: string;
+  name?: string;
+  prompt?: string;
+  category?: string;
+};
+
+type CollectionBody = {
+  id?: string;
+  name?: string;
+  description?: string;
+  color?: string;
+  imageIds?: string[];
 };
 
 function createId(prefix: string) {
@@ -92,6 +121,21 @@ app.get('/config', async () => ({
     r2PublicLorasBaseUrl: String(process.env.R2_PUBLIC_LORAS_BASE_URL || '').trim() || null,
   },
   persistence: getMulenPersistencePublicStatus(),
+}));
+
+app.get('/providers/catalog', async () => ({
+  ok: true,
+  providers: PROVIDER_CATALOG,
+}));
+
+app.get('/saved-prompts', async () => ({
+  ok: true,
+  prompts: await listSavedPromptsStore(),
+}));
+
+app.get('/collections', async () => ({
+  ok: true,
+  collections: await listCollectionsStore(),
 }));
 
 app.post('/debug/reset', async () => {
@@ -284,6 +328,94 @@ app.post<{ Body: EnhancePromptBody }>('/prompt/enhance', async (request, reply) 
   }
 });
 
+app.post<{ Body: PromptVariantsBody }>('/prompt/variants', async (request, reply) => {
+  const prompt = String(request.body?.prompt || '');
+  if (!prompt.trim()) {
+    return reply.code(400).send({ error: 'Prompt is empty.' });
+  }
+
+  if (!canRunPromptEnhancer()) {
+    return reply.code(503).send({ error: 'Prompt variants are not available.' });
+  }
+
+  try {
+    const variants = await generate3PromptVariantsText(prompt);
+    return {
+      ok: true,
+      variants,
+    };
+  } catch (error) {
+    request.log.error({ err: error }, 'Prompt variants failed');
+    return reply.code(502).send({
+      error: error instanceof Error ? error.message : 'Prompt variants failed.',
+    });
+  }
+});
+
+app.post<{ Body: PromptRemixBody }>('/prompt/remix', async (request, reply) => {
+  const promptA = String(request.body?.promptA || '').trim();
+  const promptB = String(request.body?.promptB || '').trim();
+  const mix = request.body?.mix ?? {};
+
+  if (!promptA || !promptB) {
+    return reply.code(400).send({ error: 'Both promptA and promptB are required.' });
+  }
+
+  return {
+    ok: true,
+    prompt: semanticRemix(promptA, promptB, mix),
+  };
+});
+
+app.post<{ Body: SavedPromptBody }>('/saved-prompts', async (request, reply) => {
+  const name = String(request.body?.name || '').trim();
+  const prompt = String(request.body?.prompt || '');
+
+  if (!name || !prompt.trim()) {
+    return reply.code(400).send({ error: 'Both name and prompt are required.' });
+  }
+
+  return {
+    ok: true,
+    prompt: await upsertSavedPromptStore({
+      id: request.body?.id,
+      name,
+      prompt,
+      category: request.body?.category,
+    }),
+  };
+});
+
+app.delete('/saved-prompts/:id', async (request) => {
+  const params = request.params as { id: string };
+  await deleteSavedPromptStore(params.id);
+  return { ok: true };
+});
+
+app.post<{ Body: CollectionBody }>('/collections', async (request, reply) => {
+  const name = String(request.body?.name || '').trim();
+  if (!name) {
+    return reply.code(400).send({ error: 'Collection name is required.' });
+  }
+
+  return {
+    ok: true,
+    collection: await upsertCollectionStore({
+      id: request.body?.id,
+      name,
+      description: request.body?.description,
+      color: request.body?.color,
+      imageIds: Array.isArray(request.body?.imageIds) ? request.body?.imageIds : [],
+    }),
+  };
+});
+
+app.delete('/collections/:id', async (request) => {
+  const params = request.params as { id: string };
+  await deleteCollectionStore(params.id);
+  return { ok: true };
+});
+
 app.post<{ Body: CreateJobBody }>('/jobs', async (request, reply) => {
   const body = request.body ?? {};
   const projectId = ensureProjectId(body.projectId);
@@ -303,6 +435,7 @@ app.post<{ Body: CreateJobBody }>('/jobs', async (request, reply) => {
       aspectRatio: body.aspectRatio ?? body.input?.aspectRatio ?? 'original',
       polishMode: body.polishMode ?? body.input?.polishMode ?? 'focused',
       sourceVersionId: body.sourceVersionId ?? body.input?.sourceVersionId,
+      temporaryReferenceAssetIds: body.temporaryReferenceAssetIds ?? body.input?.temporaryReferenceAssetIds,
     },
     outputVersionIds: [],
     createdAt: now,

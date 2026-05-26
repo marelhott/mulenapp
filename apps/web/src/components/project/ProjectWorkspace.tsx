@@ -1,5 +1,5 @@
 import { startTransition, useEffect, useRef, useState, useMemo } from 'react';
-import { BadgePlus, BookOpen, ChevronDown, Flower2, Grid2x2, ImageIcon, ImageUp, List, PanelRight, Sparkles, Square, UserRound, X } from 'lucide-react';
+import { ArrowLeft, BadgePlus, BookOpen, ChevronDown, Download, Flower2, FolderClosed, Grid2x2, ImageIcon, ImagePlus, ImageUp, List, PanelRight, PencilLine, RefreshCw, Save, Sparkles, Square, Trash2, UserRound, X } from 'lucide-react';
 import type {
   Asset,
   EditStep,
@@ -19,6 +19,7 @@ import { ImageComparisonModal } from './ImageComparisonModal';
 import type { NanoRoute } from '../../types/nano';
 import { getNanoRouteLabel, mapNanoRouteToModule } from '../../types/nano';
 import { api, fileToDataUrl, setModel, type ApiConfig, waitForJob } from '../../lib/api';
+import { PromptHistory } from '../../lib/promptHistory';
 
 type WorkspaceState = {
   project: Project;
@@ -75,6 +76,15 @@ type SavedPrompt = {
 
 const SAVED_PROMPTS_STORAGE_KEY = 'mulen-saved-prompts';
 const SELECTED_IMAGE_MODEL_STORAGE_KEY = 'mulen-selected-image-model';
+
+type PhotoDirectorProviderUi = 'gemini' | 'chatgpt' | 'flux_pro';
+
+const IMAGE_MODEL_PRESETS: Array<{ id: string; provider: PhotoDirectorProviderUi; title: string; subtitle: string }> = [
+  { id: 'gemini-flash', provider: 'gemini', title: 'Nano 2', subtitle: 'Gemini 3.1 Flash' },
+  { id: 'gemini-pro', provider: 'gemini', title: 'Nano Pro', subtitle: 'Gemini 3 Pro' },
+  { id: 'openai-image', provider: 'chatgpt', title: 'GPT Img 2', subtitle: 'OpenAI' },
+  { id: 'flux-pro', provider: 'flux_pro', title: 'Flux Pro', subtitle: 'fal.ai' },
+];
 
 const MOCK_GENERATED_IMAGES = [
   'https://images.unsplash.com/photo-1511499767150-a48a237f0083?auto=format&fit=crop&w=1200&q=80',
@@ -240,14 +250,20 @@ function getAspectRatioValue(label?: string): string {
   return '1 / 1';
 }
 
+function resolvePhotoDirectorAspectRatio(hasSourceImage: boolean): 'original' | 'square' {
+  return hasSourceImage ? 'original' : 'square';
+}
+
 function MainCanvas(props: {
   snapshot: WorkspaceState;
   activeRoute: NanoRoute;
   onSelectVersion: (versionId: string) => void;
+  onUseVersionAsInput?: (versionId: string) => void;
   onCreateExport: () => void;
   isGenerating: boolean;
   generatingCount?: number;
-  onRegenerateVersion?: (versionId: string, prompt: string) => void;
+  onRegenerateVersion?: (versionId: string, prompt: string, referenceAssetIds?: string[]) => Promise<void> | void;
+  onUploadReferenceAsset?: (file: File) => Promise<Asset | null>;
   onDeleteVersion?: (versionId: string) => void;
   onDeleteRow?: (jobId: string) => void;
 }) {
@@ -264,6 +280,9 @@ function MainCanvas(props: {
     cards: Array<{ id: string; versionId: string; url: string; label?: string; resolution: string; prompt: string; aspectRatio: string; modelLabel: string; createdAt: string }>;
     index: number;
   } | null>(null);
+  const [detailModalTab, setDetailModalTab] = useState<'details' | 'comments'>('details');
+  const [modalRegeneratingVersionId, setModalRegeneratingVersionId] = useState<string | null>(null);
+  const [modalReferenceAssetIds, setModalReferenceAssetIds] = useState<Record<string, string[]>>({});
 
   // Session-local generated images (cleared on refresh automatically because state is not persisted)
   const [sessionImages, setSessionImages] = useState<Array<{
@@ -276,7 +295,6 @@ function MainCanvas(props: {
     error?: string;
   }>>([]);
   const [editPrompts, setEditPrompts] = useState<Record<string, string>>({});
-  const [showReferenceUpload, setShowReferenceUpload] = useState<Record<string, boolean>>({});
 
   // Sync newly persisted versions into sessionImages (only add, never pre-populate on mount)
   const seenVersionIds = useRef(new Set<string>());
@@ -388,6 +406,7 @@ function MainCanvas(props: {
   );
 
   const creationRows = useMemo(() => {
+    const hasSourceImageForPendingRow = Boolean(props.snapshot.project.originalAssetId);
     const rows = photoDirectorJobs
       .map((job) => {
         const versions = job.outputVersionIds
@@ -445,7 +464,7 @@ function MainCanvas(props: {
         id: 'pending-generation',
         prompt: props.snapshot.photoDirectorInstruction || 'Generating...',
         createdAt: new Date().toISOString(),
-        aspectRatio: formatAspectRatioLabel(props.snapshot.photoDirectorAspectRatio),
+        aspectRatio: formatAspectRatioLabel(resolvePhotoDirectorAspectRatio(hasSourceImageForPendingRow)),
         modelLabel: formatModelBadge(props.snapshot.modelRuns[0]?.model ?? 'gemini-3.1-flash-image-preview'),
         speedLabel: formatSpeedBadge(props.snapshot.photoDirectorPolishMode),
         cards: Array.from({ length: props.generatingCount ?? 1 }, (_, index) => ({
@@ -464,12 +483,54 @@ function MainCanvas(props: {
     props.generatingCount,
     props.isGenerating,
     props.snapshot.modelRuns,
-    props.snapshot.photoDirectorAspectRatio,
     props.snapshot.photoDirectorInstruction,
     props.snapshot.photoDirectorPolishMode,
+    props.snapshot.project.originalAssetId,
     props.snapshot.versions,
     props.snapshot,
   ]);
+
+  const detailCard = detailModal ? detailModal.cards[detailModal.index] : null;
+  const detailReferenceAssets = detailCard
+    ? (modalReferenceAssetIds[detailCard.versionId] ?? [])
+        .map((assetId) => props.snapshot.assets.find((asset: Asset) => asset.id === assetId))
+        .filter((asset): asset is Asset => Boolean(asset))
+    : [];
+  const detailEditPrompt = detailCard ? (editPrompts[detailCard.versionId] ?? detailCard.prompt) : '';
+
+  const handleDetailModalReferenceSelect = (versionId: string, asset: Asset) => {
+    setModalReferenceAssetIds((current) => ({
+      ...current,
+      [versionId]: Array.from(new Set([asset.id, ...(current[versionId] ?? [])])),
+    }));
+  };
+
+  const handleDetailModalReferenceUpload = async (versionId: string, file: File) => {
+    const uploadedAsset = await props.onUploadReferenceAsset?.(file);
+    if (!uploadedAsset) return;
+    handleDetailModalReferenceSelect(versionId, uploadedAsset);
+  };
+
+  const handleDetailModalReferenceRemove = (versionId: string, assetId: string) => {
+    setModalReferenceAssetIds((current) => ({
+      ...current,
+      [versionId]: (current[versionId] ?? []).filter((currentAssetId) => currentAssetId !== assetId),
+    }));
+  };
+
+  const handleDetailModalRegenerate = async () => {
+    if (!detailCard?.versionId || !props.onRegenerateVersion) return;
+    const nextPrompt = detailEditPrompt.trim();
+    if (!nextPrompt) return;
+
+    try {
+      setModalRegeneratingVersionId(detailCard.versionId);
+      await props.onRegenerateVersion(detailCard.versionId, nextPrompt, modalReferenceAssetIds[detailCard.versionId] ?? []);
+      setDetailModal(null);
+    } finally {
+      setModalRegeneratingVersionId(null);
+    }
+  };
 
   return (
     <main className={props.activeRoute === 'mulen' ? 'main-canvas main-canvas--mulen' : 'main-canvas'}>
@@ -559,7 +620,7 @@ function MainCanvas(props: {
                               if (!card.url) return;
                               const allCards = row.cards.filter(c => c.url).map(c => ({ ...c, prompt: row.prompt, aspectRatio: row.aspectRatio, modelLabel: row.modelLabel, createdAt: row.createdAt }));
                               const clickedIndex = allCards.findIndex(c => c.id === card.id);
-                              setDetailModal({ cards: allCards, index: Math.max(0, clickedIndex) }); setModalZoom(1); setModalPan({ x: 0, y: 0 });
+                              setDetailModal({ cards: allCards, index: Math.max(0, clickedIndex) }); setDetailModalTab('details'); setModalZoom(1); setModalPan({ x: 0, y: 0 });
                               if (card.versionId) props.onSelectVersion(card.versionId);
                             }}
                           >
@@ -640,14 +701,14 @@ function MainCanvas(props: {
                                 if (!card.url) return;
                                 const allCards = row.cards.filter(c => c.url).map(c => ({ ...c, prompt: row.prompt, aspectRatio: row.aspectRatio, modelLabel: row.modelLabel, createdAt: row.createdAt }));
                                 const clickedIndex = allCards.findIndex(c => c.id === card.id);
-                                setDetailModal({ cards: allCards, index: Math.max(0, clickedIndex) }); setModalZoom(1); setModalPan({ x: 0, y: 0 });
+                                setDetailModal({ cards: allCards, index: Math.max(0, clickedIndex) }); setDetailModalTab('details'); setModalZoom(1); setModalPan({ x: 0, y: 0 });
                                 if (card.versionId) props.onSelectVersion(card.versionId);
                               }}
                               onKeyDown={(e) => {
                                 if ((e.key === 'Enter' || e.key === ' ') && card.url) {
                                   const allCards = row.cards.filter(c => c.url).map(c => ({ ...c, prompt: row.prompt, aspectRatio: row.aspectRatio, modelLabel: row.modelLabel, createdAt: row.createdAt }));
                                   const clickedIndex = allCards.findIndex(c => c.id === card.id);
-                                  setDetailModal({ cards: allCards, index: Math.max(0, clickedIndex) }); setModalZoom(1); setModalPan({ x: 0, y: 0 });
+                                  setDetailModal({ cards: allCards, index: Math.max(0, clickedIndex) }); setDetailModalTab('details'); setModalZoom(1); setModalPan({ x: 0, y: 0 });
                                 }
                               }}
                             >
@@ -742,140 +803,239 @@ function MainCanvas(props: {
       ) : null}
 
       {/* ── Magnific Detail Modal ── */}
-      {detailModal && (() => {
-        const card = detailModal.cards[detailModal.index];
-        if (!card) return null;
-        return (
-          <div
-            className="mag-modal-overlay"
-            role="dialog"
-            aria-modal="true"
-            onClick={(e) => { if (e.target === e.currentTarget) setDetailModal(null); }}
-          >
-            <div className="mag-modal">
-              {/* Close */}
-              <button
-                type="button"
-                className="mag-modal-close"
-                aria-label="Zavřít"
-                onClick={() => setDetailModal(null)}
-              >
-                <X size={16} />
-              </button>
-              {/* Prev */}
-              <button
-                type="button"
-                className="mag-modal-prev"
-                disabled={detailModal.index <= 0}
-                onClick={() => { setDetailModal(m => m ? { ...m, index: m.index - 1 } : null); setModalZoom(1); setModalPan({ x: 0, y: 0 }); }}
-              >
-                <ChevronDown size={16} style={{ transform: 'rotate(90deg)' }} />
-              </button>
-              {/* Next */}
-              <button
-                type="button"
-                className="mag-modal-next"
-                disabled={detailModal.index >= detailModal.cards.length - 1}
-                onClick={() => { setDetailModal(m => m ? { ...m, index: m.index + 1 } : null); setModalZoom(1); setModalPan({ x: 0, y: 0 }); }}
-              >
-                <ChevronDown size={16} style={{ transform: 'rotate(-90deg)' }} />
-              </button>
+      {detailModal && detailCard ? (
+        <div
+          className="mag-modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          onClick={(e) => { if (e.target === e.currentTarget) setDetailModal(null); }}
+        >
+          <div className="mag-modal">
+            <button
+              type="button"
+              className="mag-modal-close"
+              aria-label="Zavřít"
+              onClick={() => setDetailModal(null)}
+            >
+              <X size={16} />
+            </button>
+            <button
+              type="button"
+              className="mag-modal-prev"
+              disabled={detailModal.index <= 0}
+              onClick={() => { setDetailModal((m) => m ? { ...m, index: m.index - 1 } : null); setDetailModalTab('details'); setModalZoom(1); setModalPan({ x: 0, y: 0 }); }}
+            >
+              <ChevronDown size={16} style={{ transform: 'rotate(90deg)' }} />
+            </button>
+            <button
+              type="button"
+              className="mag-modal-next"
+              disabled={detailModal.index >= detailModal.cards.length - 1}
+              onClick={() => { setDetailModal((m) => m ? { ...m, index: m.index + 1 } : null); setDetailModalTab('details'); setModalZoom(1); setModalPan({ x: 0, y: 0 }); }}
+            >
+              <ChevronDown size={16} style={{ transform: 'rotate(-90deg)' }} />
+            </button>
 
-              {/* Left: image (with scroll zoom + drag pan) */}
-              <div
-                className="mag-modal-image-side"
-                style={{ overflow: 'hidden', cursor: modalZoom > 1 ? 'grab' : 'default' }}
-                onWheel={(e) => {
-                  e.preventDefault();
-                  const next = Math.max(1, Math.min(8, modalZoom * (e.deltaY < 0 ? 1.12 : 0.89)));
-                  if (next === 1) setModalPan({ x: 0, y: 0 });
-                  setModalZoom(next);
-                }}
-                onMouseDown={(e) => {
-                  if (modalZoom <= 1) return;
-                  modalDragRef.current = { dragging: true, startX: e.clientX, startY: e.clientY, startPanX: modalPan.x, startPanY: modalPan.y };
-                  (e.currentTarget as HTMLElement).style.cursor = 'grabbing';
-                  e.preventDefault();
-                }}
-                onMouseMove={(e) => {
-                  if (!modalDragRef.current.dragging) return;
-                  setModalPan({ x: modalDragRef.current.startPanX + (e.clientX - modalDragRef.current.startX) / modalZoom, y: modalDragRef.current.startPanY + (e.clientY - modalDragRef.current.startY) / modalZoom });
-                }}
-                onMouseUp={(e) => { modalDragRef.current.dragging = false; (e.currentTarget as HTMLElement).style.cursor = modalZoom > 1 ? 'grab' : 'default'; }}
-                onMouseLeave={(e) => { modalDragRef.current.dragging = false; (e.currentTarget as HTMLElement).style.cursor = 'default'; }}
-                onDoubleClick={() => { setModalZoom(1); setModalPan({ x: 0, y: 0 }); }}
-              >
-                <img
-                  src={card.url}
-                  alt={card.label || card.prompt}
-                  style={{ transform: `scale(${modalZoom}) translate(${modalPan.x}px, ${modalPan.y}px)`, transition: modalDragRef.current.dragging ? 'none' : 'transform 0.15s', userSelect: 'none', pointerEvents: 'none' }}
-                  draggable={false}
-                />
+            <div
+              className="mag-modal-image-side"
+              style={{ overflow: 'hidden', cursor: modalZoom > 1 ? 'grab' : 'default' }}
+              onWheel={(e) => {
+                e.preventDefault();
+                const next = Math.max(1, Math.min(8, modalZoom * (e.deltaY < 0 ? 1.12 : 0.89)));
+                if (next === 1) setModalPan({ x: 0, y: 0 });
+                setModalZoom(next);
+              }}
+              onMouseDown={(e) => {
+                if (modalZoom <= 1) return;
+                modalDragRef.current = { dragging: true, startX: e.clientX, startY: e.clientY, startPanX: modalPan.x, startPanY: modalPan.y };
+                (e.currentTarget as HTMLElement).style.cursor = 'grabbing';
+                e.preventDefault();
+              }}
+              onMouseMove={(e) => {
+                if (!modalDragRef.current.dragging) return;
+                setModalPan({ x: modalDragRef.current.startPanX + (e.clientX - modalDragRef.current.startX) / modalZoom, y: modalDragRef.current.startPanY + (e.clientY - modalDragRef.current.startY) / modalZoom });
+              }}
+              onMouseUp={(e) => { modalDragRef.current.dragging = false; (e.currentTarget as HTMLElement).style.cursor = modalZoom > 1 ? 'grab' : 'default'; }}
+              onMouseLeave={(e) => { modalDragRef.current.dragging = false; (e.currentTarget as HTMLElement).style.cursor = 'default'; }}
+              onDoubleClick={() => { setModalZoom(1); setModalPan({ x: 0, y: 0 }); }}
+            >
+              <img
+                src={detailCard.url}
+                alt={detailCard.label || detailCard.prompt}
+                style={{ transform: `scale(${modalZoom}) translate(${modalPan.x}px, ${modalPan.y}px)`, transition: modalDragRef.current.dragging ? 'none' : 'transform 0.15s', userSelect: 'none', pointerEvents: 'none' }}
+                draggable={false}
+              />
+            </div>
+
+            <aside className="mag-modal-sidebar">
+              <div className="mag-modal-tabs">
+                <button
+                  type="button"
+                  className={detailModalTab === 'details' ? 'mag-modal-tab active' : 'mag-modal-tab'}
+                  onClick={() => setDetailModalTab('details')}
+                >
+                  Details
+                </button>
+                <button
+                  type="button"
+                  className={detailModalTab === 'comments' ? 'mag-modal-tab active' : 'mag-modal-tab'}
+                  onClick={() => setDetailModalTab('comments')}
+                >
+                  Comments
+                </button>
               </div>
 
-              {/* Right: sidebar */}
-              <aside className="mag-modal-sidebar">
-                {/* Tabs */}
-                <div className="mag-modal-tabs">
-                  <button type="button" className="mag-modal-tab active">Details</button>
-                  <button type="button" className="mag-modal-tab">Comments</button>
-                </div>
-
-                {/* Actions */}
-                <div className="mag-modal-actions">
-                  <button type="button" className="mag-modal-action-btn danger" title="Smazat">
-                    <X size={14} />
-                  </button>
-                  <div className="mag-modal-divider" />
-                  <a
-                    href={card.url}
-                    download
-                    className="mag-modal-download-btn"
-                    title="Stáhnout PNG"
-                  >
-                    <ImageIcon size={13} />
-                    PNG
-                  </a>
-                </div>
-
-                {/* Timestamp */}
-                <p className="mag-modal-timestamp">{formatRelativeTimeLabel(card.createdAt)} · Uloženo v projektu</p>
-
-                {/* Prompt */}
-                <div>
-                  <p className="mag-modal-section-title">Prompt</p>
-                  <p className="mag-modal-prompt-text">{card.prompt}</p>
-                </div>
-
-                {/* Settings badges */}
-                <div>
-                  <p className="mag-modal-section-title">Settings</p>
-                  <div className="mag-modal-badges">
-                    {card.aspectRatio && <span className="mag-modal-badge">{card.aspectRatio}</span>}
-                    {card.modelLabel && <span className="mag-modal-badge">{card.modelLabel}</span>}
-                    {card.resolution && <span className="mag-modal-badge">{card.resolution}</span>}
+              {detailModalTab === 'details' ? (
+                <>
+                  <div className="mag-modal-actions">
+                    <button
+                      type="button"
+                      className="mag-modal-action-btn"
+                      title="Použít obrázek"
+                      onClick={() => {
+                        if (detailCard.versionId) props.onSelectVersion(detailCard.versionId);
+                        setDetailModal(null);
+                      }}
+                    >
+                      <Sparkles size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      className="mag-modal-action-btn"
+                      title="Regenerovat obrázek"
+                      disabled={modalRegeneratingVersionId === detailCard.versionId}
+                      onClick={() => {
+                        void handleDetailModalRegenerate();
+                      }}
+                    >
+                      <RefreshCw size={14} />
+                    </button>
+                    <a
+                      href={detailCard.url}
+                      download
+                      className="mag-modal-action-btn"
+                      title="Stáhnout"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <Download size={14} />
+                    </a>
+                    <button
+                      type="button"
+                      className="mag-modal-action-btn danger"
+                      title="Smazat"
+                      onClick={() => {
+                        if (detailCard.versionId) props.onDeleteVersion?.(detailCard.versionId);
+                        setDetailModal(null);
+                      }}
+                    >
+                      <Trash2 size={14} />
+                    </button>
                   </div>
-                </div>
 
-                {/* CTA buttons */}
-                <div className="mag-modal-cta-list">
-                  <button
-                    type="button"
-                    className="mag-modal-cta-btn primary"
-                    onClick={() => {
-                      if (card.versionId) props.onSelectVersion(card.versionId);
-                      setDetailModal(null);
-                    }}
-                  >
-                    <Sparkles size={13} />
-                    Použít obrázek
-                  </button>
+                  <p className="mag-modal-timestamp">{formatRelativeTimeLabel(detailCard.createdAt)} · Uloženo v projektu</p>
+
+                  <div>
+                    <p className="mag-modal-section-title">Prompt</p>
+                    <p className="mag-modal-prompt-text">{detailCard.prompt}</p>
+                  </div>
+
+                  <div>
+                    <p className="mag-modal-section-title">Settings</p>
+                    <div className="mag-modal-badges">
+                      {detailCard.aspectRatio && <span className="mag-modal-badge">{detailCard.aspectRatio}</span>}
+                      {detailCard.modelLabel && <span className="mag-modal-badge">{detailCard.modelLabel}</span>}
+                      {detailCard.resolution && <span className="mag-modal-badge">{detailCard.resolution}</span>}
+                    </div>
+                  </div>
+
+                  <div className="mag-modal-editor">
+                    <div className="mag-modal-editor-head">
+                      <div className="mag-modal-editor-label">
+                        <PencilLine size={14} />
+                        <span>Upravit prompt</span>
+                      </div>
+                      <AssetLibraryPopover
+                        assets={props.snapshot.assets}
+                        selectedAssetId={detailReferenceAssets[0]?.id}
+                        onSelectAsset={(asset) => handleDetailModalReferenceSelect(detailCard.versionId, asset)}
+                        onUploadFile={(file) => {
+                          void handleDetailModalReferenceUpload(detailCard.versionId, file);
+                        }}
+                        includeSamples={false}
+                        openOnHover={false}
+                        placement="left"
+                      >
+                        <button type="button" className="mag-modal-add-images-btn">
+                          <ImagePlus size={14} />
+                          <span>+ Obrázky</span>
+                        </button>
+                      </AssetLibraryPopover>
+                    </div>
+
+                    {detailReferenceAssets.length > 0 ? (
+                      <div className="mag-modal-reference-strip">
+                        {detailReferenceAssets.map((asset) => (
+                          <div key={asset.id} className="mag-modal-reference-chip">
+                            <img src={asset.url} alt={asset.storagePath} />
+                            <button
+                              type="button"
+                              aria-label="Odebrat referenci"
+                              onClick={() => handleDetailModalReferenceRemove(detailCard.versionId, asset.id)}
+                            >
+                              <X size={10} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+
+                    <textarea
+                      className="mag-modal-editor-textarea"
+                      value={detailEditPrompt}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setEditPrompts((current) => ({
+                          ...current,
+                          [detailCard.versionId]: value,
+                        }));
+                      }}
+                    />
+
+                    <button
+                      type="button"
+                      className="mag-modal-regenerate-btn"
+                      disabled={!detailEditPrompt.trim() || modalRegeneratingVersionId === detailCard.versionId}
+                      onClick={() => {
+                        void handleDetailModalRegenerate();
+                      }}
+                    >
+                      {modalRegeneratingVersionId === detailCard.versionId ? 'Regeneruji obrázek…' : 'Regenerovat obrázek'}
+                    </button>
+                  </div>
+
+                  <div className="mag-modal-cta-list">
+                    <button
+                      type="button"
+                      className="mag-modal-cta-btn primary"
+                      onClick={() => {
+                        if (detailCard.versionId) props.onUseVersionAsInput?.(detailCard.versionId);
+                        setDetailModal(null);
+                      }}
+                    >
+                      <Sparkles size={13} />
+                      Použít obrázek
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="mag-modal-comments-empty">
+                  <p>Comments budou navazovat později. Teď je detail panel připravený pro další editaci a regeneraci obrázku.</p>
                 </div>
-              </aside>
-            </div>
+              )}
+            </aside>
           </div>
-        );
-      })()}
+        </div>
+      ) : null}
     </main>
   );
 }
@@ -1137,7 +1297,7 @@ function getRouteStageConfig(
         exportLabel: 'Export',
         badges: [
           `${snapshot.photoDirectorOutputCount} vystupy`,
-          snapshot.photoDirectorAspectRatio,
+          resolvePhotoDirectorAspectRatio(Boolean(snapshot.project.originalAssetId)),
           snapshot.photoDirectorPolishMode,
         ],
         footerTitle: 'Photo Director stage',
@@ -1211,15 +1371,8 @@ function NanoLeftSidebar(props: {
   canGenerate: boolean;
   selectedModelId?: string;
   onModelSelect?: (modelId: string) => void;
-  aspectRatio?: 'original' | 'square' | 'portrait' | 'landscape';
-  onAspectRatioChange?: (value: 'original' | 'square' | 'portrait' | 'landscape') => void;
 }) {
-  const imageModelPresets = [
-    { id: 'gemini-flash', title: 'Nano 2', subtitle: 'Gemini 3.1 Flash' },
-    { id: 'gemini-pro', title: 'Nano Pro', subtitle: 'Gemini 3 Pro' },
-    { id: 'openai-image', title: 'GPT Img 2', subtitle: 'OpenAI' },
-    { id: 'flux-pro', title: 'Flux Pro', subtitle: 'fal.ai' },
-  ];
+  const imageModelPresets = IMAGE_MODEL_PRESETS;
   const referenceAssets = props.snapshot.assets.filter((asset) => asset.kind === 'reference');
   const originalAsset = props.snapshot.assets.find((asset) => asset.id === props.snapshot.project.originalAssetId);
   const headswapSourceAsset = props.snapshot.assets.find((asset) => asset.id === props.snapshot.headswapSourceAssetId);
@@ -1229,11 +1382,23 @@ function NanoLeftSidebar(props: {
   const brandSlotAsset = props.snapshot.assets.find((asset) => asset.id === props.snapshot.brandSlotAssetId);
   const [dragSection, setDragSection] = useState<'input' | 'style' | 'brand' | null>(null);
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
+  const [isReferenceMenuOpen, setIsReferenceMenuOpen] = useState(false);
   const promptToolbarRef = useRef<HTMLDivElement | null>(null);
   const modelMenuRef = useRef<HTMLDivElement | null>(null);
+  const referenceMenuRef = useRef<HTMLDivElement | null>(null);
   const route = props.activeRoute;
   const selectedModel =
     imageModelPresets.find((preset) => preset.id === props.selectedModelId) ?? imageModelPresets[0];
+  const referenceOptions = [
+    { id: 'A', label: 'Authentic', description: 'Keeps the output natural and closest to the original feel.', icon: Sparkles },
+    { id: 'B', label: 'Enhance', description: 'Adds more polish, clarity and commercial finish.', icon: BadgePlus },
+    { id: 'C', label: 'Balance', description: 'Balanced mix between realism, cleanup and creative lift.', icon: Flower2 },
+    { id: 'face-id', label: 'Face ID', description: 'Preserves facial identity more strictly across edits.', icon: UserRound },
+  ] as const;
+  const selectedReferenceOption =
+    props.faceIdentityMode
+      ? referenceOptions[3]
+      : referenceOptions.find((option) => option.id === props.advancedVariant) ?? referenceOptions[2];
 
   const handleFile = (fileList: FileList | File[], mode: 'input' | 'style' | 'brand' | 'source-face' | 'target-scene') => {
     const file = Array.from(fileList).find((item) => item.type.startsWith('image/'));
@@ -1277,6 +1442,16 @@ function NanoLeftSidebar(props: {
   });
   const selectedSavedPrompt =
     props.savedPrompts.find((prompt) => prompt.id === props.selectedSavedPromptId) ?? props.savedPrompts[0] ?? null;
+  const previewPrompts = props.savedPrompts.length
+    ? props.savedPrompts
+    : [
+        {
+          id: 'prompt-demo-1',
+          name: 'Editorial food mood',
+          text: 'Fresh salmon plated on a rustic table in a refined restaurant interior, natural light, elegant editorial food photography, crisp details, premium atmosphere.',
+          createdAt: new Date().toISOString(),
+        },
+      ];
 
   useEffect(() => {
     if ((!props.isSavedPromptsOpen && !props.isSavePromptOpen) || typeof window === 'undefined') return;
@@ -1306,6 +1481,20 @@ function NanoLeftSidebar(props: {
     window.addEventListener('pointerdown', handlePointerDown);
     return () => window.removeEventListener('pointerdown', handlePointerDown);
   }, [isModelMenuOpen]);
+
+  useEffect(() => {
+    if (!isReferenceMenuOpen || typeof window === 'undefined') return;
+
+    const handlePointerDown = (event: MouseEvent | PointerEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (referenceMenuRef.current?.contains(target)) return;
+      setIsReferenceMenuOpen(false);
+    };
+
+    window.addEventListener('pointerdown', handlePointerDown);
+    return () => window.removeEventListener('pointerdown', handlePointerDown);
+  }, [isReferenceMenuOpen]);
 
   return (
     <aside className="nano-left-panel">
@@ -1390,27 +1579,6 @@ function NanoLeftSidebar(props: {
             ))}
           </div>
         </div>
-        {route === 'mulen' && props.onAspectRatioChange ? (
-          <div className="nano-ratio-picker">
-            <p>Ratio</p>
-            <div className="nano-ratio-row">
-              {(['original', 'square', 'portrait', 'landscape'] as const).map((ratio) => {
-                const labels: Record<string, string> = { original: 'Original', square: 'Square', portrait: 'Portrait', landscape: 'Landscape' };
-                const isActive = (props.aspectRatio ?? 'original') === ratio;
-                return (
-                  <button
-                    key={ratio}
-                    type="button"
-                    className={isActive ? 'active' : ''}
-                    onClick={() => props.onAspectRatioChange!(ratio)}
-                  >
-                    {labels[ratio]}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        ) : null}
         <div className="nano-prompt-card">
           {route === 'mulen' ? (
             <>
@@ -1424,17 +1592,83 @@ function NanoLeftSidebar(props: {
                   placeholder="Describe your image-try @ to add references"
                   className="nano-prompt-surface-textarea"
                 />
-                <button
-                  type="button"
-                  className="nano-ai-prompt-button"
-                  disabled={!props.canEnhancePrompt || props.isEnhancingPrompt}
-                  onClick={props.onEnhancePrompt}
-                >
-                  <span className="nano-ai-prompt-switch" aria-hidden="true">
-                    <i />
-                  </span>
-                  <span>{props.isEnhancingPrompt ? 'AI prompt...' : 'AI prompt'}</span>
-                </button>
+                <div className="nano-prompt-surface-footer">
+                  <button
+                    type="button"
+                    className="nano-ai-prompt-button"
+                    disabled={!props.canEnhancePrompt || props.isEnhancingPrompt}
+                    onClick={props.onEnhancePrompt}
+                  >
+                    <span className="nano-ai-prompt-switch" aria-hidden="true">
+                      <i />
+                    </span>
+                    <span>{props.isEnhancingPrompt ? 'AI prompt...' : 'AI prompt'}</span>
+                  </button>
+                  <div className="nano-prompt-tools-row" ref={promptToolbarRef}>
+                    <button
+                      type="button"
+                      className="nano-prompt-tool-icon"
+                      onClick={props.onUndoPromptEnhance}
+                      disabled={!props.canUndoPromptEnhance}
+                      title="Undo"
+                      aria-label="Undo"
+                    >
+                      <ArrowLeft size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      className="nano-prompt-tool-icon"
+                      onClick={props.onOpenSavePrompt}
+                      disabled={!props.canSavePrompt}
+                      title="Save prompt"
+                      aria-label="Save prompt"
+                    >
+                      <Save size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      className="nano-prompt-tool-icon"
+                      onClick={props.onToggleSavedPrompts}
+                      title="My prompts"
+                      aria-label="My prompts"
+                    >
+                      <FolderClosed size={14} />
+                    </button>
+                    {props.isSavePromptOpen ? (
+                      <div className="nano-inline-prompt-popover nano-inline-prompt-popover--floating">
+                        <input
+                          type="text"
+                          value={props.savedPromptDraftName}
+                          onChange={(event) => props.onSavedPromptDraftNameChange(event.target.value)}
+                          placeholder="Prompt name"
+                          className="nano-prompt-name-input"
+                        />
+                        <div className="nano-prompt-popover-actions">
+                          <button type="button" className="nano-prompt-popover-button subtle" onClick={props.onCloseSavePrompt}>
+                            Cancel
+                          </button>
+                          <button type="button" className="nano-prompt-popover-button" onClick={props.onSavePrompt}>
+                            Save
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                    {props.isSavedPromptsOpen ? (
+                      <div className="nano-inline-prompt-popover nano-inline-prompt-popover--floating nano-inline-prompt-library">
+                        <div className="nano-prompt-library-head">
+                          <span>Saved prompts</span>
+                        </div>
+                        {previewPrompts.map((prompt) => (
+                          <button key={prompt.id} type="button" className="nano-prompt-library-item" onClick={() => props.onLoadPrompt(prompt.text)}>
+                            <strong>{prompt.name}</strong>
+                            <span>{new Date(prompt.createdAt).toLocaleDateString('cs-CZ')}</span>
+                            <p className="nano-prompt-library-text">{prompt.text}</p>
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
               </div>
             </>
           ) : (
@@ -1473,36 +1707,64 @@ function NanoLeftSidebar(props: {
           )}
           {route === 'mulen' ? (
             <>
-              <div className="nano-reference-block">
-                <strong>REFERENCES</strong>
-                <div className="nano-reference-grid">
-                  {[
-                    { id: 'A', label: 'Authentic', icon: Sparkles },
-                    { id: 'B', label: 'Enhance', icon: BadgePlus },
-                    { id: 'C', label: 'Balance', icon: Flower2 },
-                  ].map((option) => {
-                    const Icon = option.icon;
-                    return (
-                      <button
-                        key={option.id}
-                        type="button"
-                        className={props.advancedVariant === option.id ? 'nano-reference-card active' : 'nano-reference-card'}
-                        onClick={() => props.onAdvancedVariantChange?.(option.id as 'A' | 'B' | 'C')}
-                      >
-                        <Icon size={14} strokeWidth={2} />
-                        <span>{option.label}</span>
-                      </button>
-                    );
-                  })}
-                  <button
-                    type="button"
-                    className={props.faceIdentityMode ? 'nano-reference-card active' : 'nano-reference-card'}
-                    onClick={() => props.onFaceIdentityModeChange?.(!props.faceIdentityMode)}
-                  >
-                    <UserRound size={14} strokeWidth={2} />
-                    <span>Face ID</span>
-                  </button>
-                </div>
+              <div className="nano-reference-block" ref={referenceMenuRef}>
+                <strong>PREFERENCES</strong>
+                <button
+                  type="button"
+                  className={`nano-model-select-trigger nano-reference-select-trigger ${isReferenceMenuOpen ? 'open' : ''}`}
+                  onClick={() => setIsReferenceMenuOpen((current) => !current)}
+                  aria-haspopup="listbox"
+                  aria-expanded={isReferenceMenuOpen}
+                >
+                  <span className="nano-model-select-leading" aria-hidden="true">
+                    {(() => {
+                      const Icon = selectedReferenceOption.icon;
+                      return <Icon size={16} strokeWidth={2} />;
+                    })()}
+                  </span>
+                  <span className="nano-model-select-copy">
+                    <strong>{selectedReferenceOption.label}</strong>
+                  </span>
+                  <span className="nano-model-select-chevron" aria-hidden="true">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="m6 9 6 6 6-6" />
+                    </svg>
+                  </span>
+                </button>
+                {isReferenceMenuOpen ? (
+                  <div className="nano-model-select-menu nano-reference-select-menu" role="listbox" aria-label="Reference preference selection">
+                    {referenceOptions.map((option) => {
+                      const Icon = option.icon;
+                      const isActive = option.id === 'face-id' ? props.faceIdentityMode : props.advancedVariant === option.id;
+                      return (
+                        <button
+                          key={option.id}
+                          type="button"
+                          className={isActive ? 'nano-model-select-option active nano-reference-select-option' : 'nano-model-select-option nano-reference-select-option'}
+                          onClick={() => {
+                            if (option.id === 'face-id') {
+                              props.onFaceIdentityModeChange?.(true);
+                            } else {
+                              props.onFaceIdentityModeChange?.(false);
+                              props.onAdvancedVariantChange?.(option.id as 'A' | 'B' | 'C');
+                            }
+                            setIsReferenceMenuOpen(false);
+                          }}
+                          role="option"
+                          aria-selected={isActive}
+                        >
+                          <span className="nano-reference-select-option-icon" aria-hidden="true">
+                            <Icon size={15} strokeWidth={2} />
+                          </span>
+                          <div className="nano-reference-select-option-copy">
+                            <strong>{option.label}</strong>
+                            <span>{option.description}</span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : null}
               </div>
             </>
           ) : null}
@@ -1629,6 +1891,7 @@ function NanoLeftSidebar(props: {
             >
               <UploadSection
                 asset={config.asset}
+                assets={config.asset ? [config.asset] : []}
                 count={config.count}
                 dragging={dragSection === config.dragKey}
                 onBrowse={() => document.getElementById(config.id)?.click()}
@@ -1659,21 +1922,31 @@ function UploadSection(props: {
   count: number;
   dragging: boolean;
   asset?: Asset;
+  assets?: Asset[];
   helper?: string;
   onBrowse: () => void;
   onDropFiles: (files: FileList) => void;
   onDragStateChange: (active: boolean) => void;
 }) {
+  const visibleAssets = (props.assets ?? (props.asset ? [props.asset] : [])).slice(0, 4);
+
   return (
     <section className="nano-upload-section">
       <div className="nano-upload-heading">
         <strong>{props.title}</strong>
         <span>{props.count}</span>
       </div>
-      <button
-        type="button"
-        className={props.dragging ? 'nano-upload-box dragging' : 'nano-upload-box'}
-        onClick={props.onBrowse}
+      <div
+        className={
+          props.dragging
+            ? 'nano-upload-box dragging'
+            : visibleAssets.length
+              ? 'nano-upload-box has-asset'
+              : 'nano-upload-box'
+        }
+        onClick={(event) => {
+          if (event.target === event.currentTarget) props.onBrowse();
+        }}
         onDragOver={(event) => {
           event.preventDefault();
           props.onDragStateChange(true);
@@ -1685,11 +1958,40 @@ function UploadSection(props: {
           if (event.dataTransfer.files) props.onDropFiles(event.dataTransfer.files);
         }}
       >
-        <span className="nano-upload-box-empty" aria-hidden="true">
-          <ImageUp size={13} strokeWidth={2} />
-          <em>Select image</em>
-        </span>
-      </button>
+        {visibleAssets.length ? (
+          <div className="nano-upload-box-strip">
+            {visibleAssets.map((asset, index) => (
+              <div key={asset.id} className="nano-upload-thumb" title={asset.storagePath || `${props.title} ${index + 1}`}>
+                <img className="nano-upload-box-preview" alt={props.title} src={asset.url} />
+              </div>
+            ))}
+            <button
+              type="button"
+              className="nano-upload-thumb nano-upload-thumb-add"
+              onClick={(event) => {
+                event.stopPropagation();
+                props.onBrowse();
+              }}
+              aria-label={`Add ${props.title.toLowerCase()}`}
+            >
+              <span className="nano-upload-thumb-add-plus" aria-hidden="true">+</span>
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="nano-upload-box-empty"
+            onClick={(event) => {
+              event.stopPropagation();
+              props.onBrowse();
+            }}
+            aria-label={`Select ${props.title.toLowerCase()}`}
+          >
+            <ImageUp size={20} strokeWidth={1.8} aria-hidden="true" />
+            <em>Select image</em>
+          </button>
+        )}
+      </div>
     </section>
   );
 }
@@ -2351,6 +2653,15 @@ export function ProjectWorkspace(props: {
   const [selectedModelId, setSelectedModelId] = useState<string>('gemini-flash');
   const deletedVersionIdsRef = useRef<Set<string>>(new Set());
   const deletedJobIdsRef = useRef<Set<string>>(new Set());
+  const promptHistoryRef = useRef<Record<NanoRoute, PromptHistory>>({
+    mulen: new PromptHistory(),
+    'ai-upscaler': new PromptHistory(),
+    'face-swap': new PromptHistory(),
+    reframe: new PromptHistory(),
+    'variant-lab': new PromptHistory(),
+    'visual-guide': new PromptHistory(),
+    infographic: new PromptHistory(),
+  });
 
   const canGenerate = useMemo(() => {
     switch (props.activeRoute) {
@@ -2372,6 +2683,15 @@ export function ProjectWorkspace(props: {
         return true;
     }
   }, [props.activeRoute, workspace, snapshot.assets]);
+
+  const getPromptHistory = (route: NanoRoute) => promptHistoryRef.current[route];
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const savedModelId = window.localStorage.getItem(SELECTED_IMAGE_MODEL_STORAGE_KEY);
+    const nextModel = IMAGE_MODEL_PRESETS.find((preset) => preset.id === savedModelId)?.id ?? 'gemini-flash';
+    setSelectedModelId(nextModel);
+  }, []);
 
   const syncWorkspaceFromApi = async () => {
     const nextSnapshot = filterDeletedEntities(
@@ -2478,18 +2798,18 @@ export function ProjectWorkspace(props: {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const savedModelId = window.localStorage.getItem(SELECTED_IMAGE_MODEL_STORAGE_KEY);
-    if (!savedModelId) return;
-    if (savedModelId === 'gemini-flash' || savedModelId === 'gemini-pro' || savedModelId === 'openai-image' || savedModelId === 'flux-pro') {
-      setSelectedModelId(savedModelId);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
     window.localStorage.setItem(SELECTED_IMAGE_MODEL_STORAGE_KEY, selectedModelId);
     setModel(selectedModelId).catch(console.error);
   }, [selectedModelId]);
+
+  useEffect(() => {
+    const currentPrompt = getPromptValueForRoute(props.activeRoute, workspace).trim();
+    if (!currentPrompt) return;
+    const history = getPromptHistory(props.activeRoute);
+    if (history.getAll().length === 0) {
+      history.add(currentPrompt);
+    }
+  }, [props.activeRoute, workspace.photoDirectorInstruction, workspace.visualGuidePrompt, workspace.infographicTopic]);
 
   const setActiveVersion = (versionId: string) => {
     startTransition(() => {
@@ -2505,12 +2825,7 @@ export function ProjectWorkspace(props: {
 
   const setInstruction = (value: string) => {
     setEnhanceError(null);
-    startTransition(() => {
-      setWorkspace((current) => ({
-        ...current,
-        photoDirectorInstruction: value,
-      }));
-    });
+    setPromptValueForRoute('mulen', value);
   };
 
   const setLockedText = (value: string) => {
@@ -2544,7 +2859,10 @@ export function ProjectWorkspace(props: {
     }
   };
 
-  const setPromptValueForRoute = (route: NanoRoute, value: string) => {
+  const setPromptValueForRoute = (route: NanoRoute, value: string, options?: { addToHistory?: boolean }) => {
+    if (options?.addToHistory !== false) {
+      getPromptHistory(route).add(value);
+    }
     startTransition(() => {
       setWorkspace((current) => {
         switch (route) {
@@ -2707,12 +3025,7 @@ export function ProjectWorkspace(props: {
 
   const setVisualGuidePrompt = (value: string) => {
     setEnhanceError(null);
-    startTransition(() => {
-      setWorkspace((current) => ({
-        ...current,
-        visualGuidePrompt: value,
-      }));
-    });
+    setPromptValueForRoute('visual-guide', value);
   };
 
   const setVisualGuideStepCount = (value: number) => {
@@ -2744,12 +3057,7 @@ export function ProjectWorkspace(props: {
 
   const setInfographicTopic = (value: string) => {
     setEnhanceError(null);
-    startTransition(() => {
-      setWorkspace((current) => ({
-        ...current,
-        infographicTopic: value,
-      }));
-    });
+    setPromptValueForRoute('infographic', value);
   };
 
   const setInfographicType = (value: 'edukacni' | 'srovnavaci' | 'procesni' | 'business') => {
@@ -2878,15 +3186,6 @@ export function ProjectWorkspace(props: {
     });
   };
 
-  const setAspectRatio = (value: 'original' | 'square' | 'portrait' | 'landscape') => {
-    startTransition(() => {
-      setWorkspace((current) => ({
-        ...current,
-        photoDirectorAspectRatio: value,
-      }));
-    });
-  };
-
   const setPolishMode = (value: 'focused' | 'balanced' | 'bold') => {
     startTransition(() => {
       setWorkspace((current) => ({
@@ -2970,7 +3269,7 @@ export function ProjectWorkspace(props: {
     });
   };
 
-  const handleUploadReference = async (file: File, slot: 'style' | 'brand' = 'style') => {
+  const uploadReferenceAssetToWorkspace = async (file: File, slot: 'style' | 'brand' = 'style') => {
     if (props.apiConfig?.features.inlineUpload) {
       try {
         setWorkspaceNote(`Pridavam referenci ${file.name} do Visual Canon...`);
@@ -2990,44 +3289,50 @@ export function ProjectWorkspace(props: {
           setWorkspace(next);
         });
         setWorkspaceNote(`Reference ${file.name} byla pridana do Visual Canon jako dalsi voditko pro konzistenci.`);
+        return response.asset;
       } catch (error) {
         setWorkspaceNote(error instanceof Error ? error.message : 'Upload reference selhal.');
+        return null;
       }
-      return;
+      
     }
 
     const fileUrl = URL.createObjectURL(file);
     const createdAt = new Date().toISOString();
     setWorkspaceNote(`Reference ${file.name} byla pridana do Visual Canon jako dalsi voditko pro konzistenci.`);
 
+    const assetId = `asset-reference-${Date.now()}`;
+    const nextAsset: Asset = {
+      id: assetId,
+      projectId: workspace.project.id,
+      userId: workspace.project.userId,
+      kind: 'reference',
+      url: fileUrl,
+      storagePath: `mock/references/${file.name}`,
+      mimeType: file.type || 'image/jpeg',
+      createdAt,
+    };
+
     startTransition(() => {
       setWorkspace((current) => {
-        const assetId = `asset-reference-${Date.now()}`;
-
-        const nextAsset: Asset = {
-          id: assetId,
-          projectId: current.project.id,
-          userId: current.project.userId,
-          kind: 'reference',
-          url: fileUrl,
-          storagePath: `mock/references/${file.name}`,
-          mimeType: file.type || 'image/jpeg',
-          createdAt,
-        };
-
         return {
           ...current,
           assets: [nextAsset, ...current.assets],
-          styleSlotAssetId: slot === 'style' ? assetId : current.styleSlotAssetId,
-          brandSlotAssetId: slot === 'brand' ? assetId : current.brandSlotAssetId,
+          styleSlotAssetId: slot === 'style' ? nextAsset.id : current.styleSlotAssetId,
+          brandSlotAssetId: slot === 'brand' ? nextAsset.id : current.brandSlotAssetId,
           visualCanon: {
             ...current.visualCanon,
-            referenceAssetIds: [current.project.originalAssetId, assetId].filter(Boolean) as string[],
+            referenceAssetIds: [current.project.originalAssetId, nextAsset.id].filter(Boolean) as string[],
             updatedAt: createdAt,
           },
         };
       });
     });
+    return nextAsset;
+  };
+
+  const handleUploadReference = async (file: File, slot: 'style' | 'brand' = 'style') => {
+    await uploadReferenceAssetToWorkspace(file, slot);
   };
 
   const handleSelectExistingAsset = (asset: Asset, slot: 'input' | 'style' | 'brand' | 'source-face' | 'target-scene') => {
@@ -3035,14 +3340,37 @@ export function ProjectWorkspace(props: {
 
     startTransition(() => {
       setWorkspace((current) => {
+        const isLibraryPlaceholder = asset.projectId === 'library' || asset.metadata?.placeholder === true;
+        const selectedAsset: Asset =
+          isLibraryPlaceholder
+            ? {
+                ...asset,
+                id: `asset-library-${slot}-${Date.now()}`,
+                projectId: current.project.id,
+                userId: current.project.userId,
+                kind: slot === 'input' || slot === 'target-scene' ? 'original' : 'reference',
+                createdAt,
+                metadata: {
+                  ...asset.metadata,
+                  importedFromLibrary: true,
+                  sourceAssetId: asset.id,
+                },
+              }
+            : asset;
+        const assets =
+          current.assets.some((existingAsset) => existingAsset.id === selectedAsset.id)
+            ? current.assets
+            : [selectedAsset, ...current.assets];
+
         switch (slot) {
           case 'input': {
-            const matchingVersion = current.versions.find((version) => version.assetId === asset.id);
+            const matchingVersion = current.versions.find((version) => version.assetId === selectedAsset.id);
             return {
               ...current,
+              assets,
               project: {
                 ...current.project,
-                originalAssetId: asset.id,
+                originalAssetId: selectedAsset.id,
                 activeVersionId: matchingVersion?.id ?? current.project.activeVersionId,
                 updatedAt: createdAt,
               },
@@ -3051,32 +3379,36 @@ export function ProjectWorkspace(props: {
           case 'style':
             return {
               ...current,
-              styleSlotAssetId: asset.id,
+              assets,
+              styleSlotAssetId: selectedAsset.id,
               visualCanon: {
                 ...current.visualCanon,
-                referenceAssetIds: Array.from(new Set([asset.id, ...current.visualCanon.referenceAssetIds])),
+                referenceAssetIds: Array.from(new Set([selectedAsset.id, ...current.visualCanon.referenceAssetIds])),
                 updatedAt: createdAt,
               },
             };
           case 'brand':
             return {
               ...current,
-              brandSlotAssetId: asset.id,
+              assets,
+              brandSlotAssetId: selectedAsset.id,
               visualCanon: {
                 ...current.visualCanon,
-                referenceAssetIds: Array.from(new Set([asset.id, ...current.visualCanon.referenceAssetIds])),
+                referenceAssetIds: Array.from(new Set([selectedAsset.id, ...current.visualCanon.referenceAssetIds])),
                 updatedAt: createdAt,
               },
             };
           case 'source-face':
             return {
               ...current,
-              headswapSourceAssetId: asset.id,
+              assets,
+              headswapSourceAssetId: selectedAsset.id,
             };
           case 'target-scene':
             return {
               ...current,
-              headswapTargetAssetId: asset.id,
+              assets,
+              headswapTargetAssetId: selectedAsset.id,
             };
         }
       });
@@ -3091,6 +3423,26 @@ export function ProjectWorkspace(props: {
     } as const;
 
     setWorkspaceNote(labels[slot]);
+  };
+
+  const handleUseVersionAsInput = (versionId: string) => {
+    const selectedVersion = workspace.versions.find((version) => version.id === versionId);
+    const selectedAsset = selectedVersion ? workspace.assets.find((asset) => asset.id === selectedVersion.assetId) : null;
+    if (!selectedVersion || !selectedAsset) return;
+
+    startTransition(() => {
+      setWorkspace((current) => ({
+        ...current,
+        project: {
+          ...current.project,
+          originalAssetId: selectedAsset.id,
+          activeVersionId: selectedVersion.id,
+          updatedAt: new Date().toISOString(),
+        },
+      }));
+    });
+
+    setWorkspaceNote('Vybraný obrázek je teď nastavený jako nový vstup v Input images.');
   };
 
   const handleHeadswapSourceUpload = async (file: File) => {
@@ -3204,10 +3556,11 @@ export function ProjectWorkspace(props: {
   const handleGenerate = async () => {
     if (props.activeRoute === 'mulen' && props.apiConfig?.features.photoDirector) {
       const originalAsset = workspace.assets.find((asset) => asset.id === workspace.project.originalAssetId);
-      const useSourceImage = Boolean(originalAsset && originalAsset.kind === 'original' && !isMockLikeAsset(originalAsset));
+      const useSourceImage = Boolean(originalAsset && !isMockLikeAsset(originalAsset));
       const useReferenceImages = workspace.visualCanon.referenceAssetIds
         .map((assetId) => workspace.assets.find((asset) => asset.id === assetId))
         .some((asset) => asset?.kind === 'reference' && !isMockLikeAsset(asset));
+      const nextAspectRatio = resolvePhotoDirectorAspectRatio(useSourceImage);
 
       setIsGenerating(true);
       setWorkspaceNote('Photo Director odesila zadani do backend job systemu a ceka na novou verzi.');
@@ -3218,7 +3571,7 @@ export function ProjectWorkspace(props: {
           instruction: workspace.photoDirectorInstruction,
           lockedText: workspace.photoDirectorLockedText,
           outputCount: workspace.photoDirectorOutputCount,
-          aspectRatio: workspace.photoDirectorAspectRatio,
+          aspectRatio: nextAspectRatio,
           polishMode: workspace.photoDirectorPolishMode,
           promptMode,
           simpleLinkMode,
@@ -3259,6 +3612,7 @@ export function ProjectWorkspace(props: {
           const createdAt = new Date().toISOString();
           const activeVersion = current.versions.find((version) => version.id === current.project.activeVersionId) ?? current.versions[0];
           const variantIndex = current.versions.filter((version) => version.module === 'photo-director').length;
+          const nextAspectRatio = resolvePhotoDirectorAspectRatio(Boolean(current.project.originalAssetId));
           const jobId = `job-generated-${Date.now()}`;
           const assets: Asset[] = [];
           const versions: ImageVersion[] = [];
@@ -3286,7 +3640,7 @@ export function ProjectWorkspace(props: {
               mimeType: 'image/jpeg',
               createdAt,
               metadata: {
-                aspectRatio: current.photoDirectorAspectRatio,
+                aspectRatio: nextAspectRatio,
                 polishMode: current.photoDirectorPolishMode,
               },
             });
@@ -3304,7 +3658,7 @@ export function ProjectWorkspace(props: {
               qualityScore: 84 + index,
               modelRuns: [runId],
               metadata: {
-                aspectRatio: current.photoDirectorAspectRatio,
+                aspectRatio: nextAspectRatio,
                 polishMode: current.photoDirectorPolishMode,
               },
             });
@@ -3371,7 +3725,7 @@ export function ProjectWorkspace(props: {
                   instruction: current.photoDirectorInstruction,
                   locked: current.photoDirectorLockedText,
                   outputCount: current.photoDirectorOutputCount,
-                  aspectRatio: current.photoDirectorAspectRatio,
+                  aspectRatio: nextAspectRatio,
                   polishMode: current.photoDirectorPolishMode,
                 },
                 outputVersionIds,
@@ -3394,7 +3748,7 @@ export function ProjectWorkspace(props: {
     }, 900);
   };
 
-  const handleRegenerateFromCanvas = async (sourceVersionId: string, prompt: string) => {
+  const handleRegenerateFromCanvas = async (sourceVersionId: string, prompt: string, referenceAssetIds: string[] = []) => {
     if (props.activeRoute !== 'mulen') return;
 
     setIsGenerating(true);
@@ -3402,18 +3756,24 @@ export function ProjectWorkspace(props: {
 
     try {
       if (props.apiConfig?.features.photoDirector) {
+        const sourceVersion = workspace.versions.find((version) => version.id === sourceVersionId);
+        const sourceAspectRatio = (sourceVersion?.metadata?.aspectRatio as 'original' | 'square' | 'portrait' | 'landscape' | undefined) ?? 'original';
         const job = await api.createPhotoDirectorJob({
           projectId: workspace.project.id,
           instruction: prompt,
           lockedText: workspace.photoDirectorLockedText,
           outputCount: 1,
-          aspectRatio: workspace.photoDirectorAspectRatio,
+          aspectRatio: sourceAspectRatio,
           polishMode: workspace.photoDirectorPolishMode,
           promptMode,
           simpleLinkMode,
           advancedVariant,
           faceIdentityMode,
           sourceVersionId,
+          useSourceImage: true,
+          useReferenceImages: referenceAssetIds.length > 0,
+          temporaryReferenceAssetIds: referenceAssetIds,
+          modelId: selectedModelId,
         });
 
         const finalJob = await waitForJob(job.id, (progressJob) => {
@@ -4998,17 +5358,17 @@ export function ProjectWorkspace(props: {
           selectedSavedPromptId={selectedSavedPromptId}
           selectedModelId={selectedModelId}
           onModelSelect={setSelectedModelId}
-          aspectRatio={workspace.photoDirectorAspectRatio}
-          onAspectRatioChange={setAspectRatio}
         />
         <MainCanvas
           activeRoute={props.activeRoute}
           snapshot={workspace}
           onCreateExport={handleCreateExport}
           onSelectVersion={setActiveVersion}
+          onUseVersionAsInput={handleUseVersionAsInput}
           isGenerating={isGenerating}
           generatingCount={workspace.photoDirectorOutputCount}
           onRegenerateVersion={handleRegenerateFromCanvas}
+          onUploadReferenceAsset={uploadReferenceAssetToWorkspace}
           onDeleteVersion={handleDeleteVersion}
           onDeleteRow={handleDeleteRow}
         />

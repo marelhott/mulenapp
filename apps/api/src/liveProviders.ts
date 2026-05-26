@@ -1,5 +1,7 @@
 import type { Asset, EditStep, GenerationJob, ImageVersion, ModelRun, QualityEvaluation, WorkspaceSnapshot } from '@mulen/shared';
 import { canUseSupabaseStorage, persistGeneratedImageMetadata, uploadDataUrlToSupabase } from './supabaseStorage.js';
+import { chunkBatchItems, getRetryBackoffMs, isRetriableProviderError, mapAspectRatioForProvider } from './photoDirectorInternals.js';
+import { buildSimpleLinkPrompt } from './promptComposition.js';
 
 type PhotoDirectorProvider = 'gemini' | 'chatgpt' | 'flux_pro';
 type ProviderImageInput = { data: string; mimeType: string };
@@ -45,6 +47,19 @@ No explanations.
 No comments.
 No markdown.`;
 
+const PROMPT_VARIANTS_SYSTEM_PROMPT = `You are an expert prompt designer for AI image generation.
+
+Take the user's prompt and create exactly 3 distinct variants with different approaches, while preserving the same core intent.
+
+Return ONLY valid JSON as an array of 3 objects with keys:
+- variant
+- approach
+- prompt
+
+No markdown.
+No explanation.
+No extra text.`;
+
 function createId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -71,13 +86,6 @@ function resolvePhotoDirectorProvider(modelId?: string): { provider: PhotoDirect
     return { provider: 'gemini', preferredModel: 'gemini-3-pro-image-preview' };
   }
   return { provider: 'gemini', preferredModel: 'gemini-3.1-flash-image-preview' };
-}
-
-function mapPhotoDirectorAspectRatio(value?: unknown): string {
-  const normalized = String(value || 'square').toLowerCase();
-  if (normalized === 'portrait' || normalized === '3:4') return '3:4';
-  if (normalized === 'landscape' || normalized === '4:3') return '4:3';
-  return '1:1';
 }
 
 function dataUrlToInlinePart(dataUrl: string) {
@@ -321,7 +329,7 @@ function extractGeminiText(data: any) {
   return text || null;
 }
 
-async function callGeminiText(prompt: string, apiKey: string) {
+async function callGeminiText(prompt: string, apiKey: string, systemPrompt = PROMPT_ENHANCER_SYSTEM_PROMPT, maxOutputTokens = 300) {
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_TEXT_MODEL)}:generateContent?key=${encodeURIComponent(apiKey)}`;
   const response = await fetch(endpoint, {
     method: 'POST',
@@ -330,7 +338,7 @@ async function callGeminiText(prompt: string, apiKey: string) {
     },
     body: JSON.stringify({
       systemInstruction: {
-        parts: [{ text: PROMPT_ENHANCER_SYSTEM_PROMPT }],
+        parts: [{ text: systemPrompt }],
       },
       contents: [
         {
@@ -340,7 +348,7 @@ async function callGeminiText(prompt: string, apiKey: string) {
       generationConfig: {
         temperature: 0.1,
         topP: 0.1,
-        maxOutputTokens: 300,
+        maxOutputTokens,
       },
     }),
   });
@@ -353,44 +361,14 @@ async function callGeminiText(prompt: string, apiKey: string) {
   return data;
 }
 
-function collectReferenceAssets(snapshot: WorkspaceSnapshot) {
-  return snapshot.visualCanon.referenceAssetIds
+function collectReferenceAssets(snapshot: WorkspaceSnapshot, explicitAssetIds?: string[]) {
+  const assetIds = explicitAssetIds?.length ? explicitAssetIds : snapshot.visualCanon.referenceAssetIds;
+
+  return assetIds
     .map((assetId) => snapshot.assets.find((asset) => asset.id === assetId))
     .filter((asset): asset is Asset => Boolean(asset))
     .filter((asset) => asset.kind === 'reference')
     .slice(0, 2);
-}
-
-function buildSimpleLinkPrompt(
-  mode: 'style' | 'merge' | 'object',
-  extra: string,
-  sourceImageCount: number,
-  styleImageCount: number,
-  assetImageCount: number,
-) {
-  const header = `
-[LINK MODE: ${mode.toUpperCase()}]
-Images order: first ${sourceImageCount} input image(s), then ${styleImageCount} style image(s), then ${assetImageCount} proprietary asset image(s).
-`;
-
-  if (mode === 'style') {
-    return `${header}
-Apply the visual style, composition, lighting, color grading, lens feel, and overall mood from the style image(s) to the input image(s), while preserving the identity and content of the input subject(s). Do NOT transfer objects/content from style; transfer only aesthetic and photographic/artistic treatment.
-
-${extra ? `Additional instructions:\n${extra}\n` : ''}`.trim();
-  }
-
-  if (mode === 'merge') {
-    return `${header}
-Create a cohesive merge of input and style images. You may blend both aesthetic and content elements to produce a unified result that feels intentional, natural, and high quality. Use the style image(s) as a compositional template when helpful, but preserve the identity of subjects from the input image(s).
-
-${extra ? `Additional instructions:\n${extra}\n` : ''}`.trim();
-  }
-
-  return `${header}
-Transfer the dominant object/element from the style image(s) onto the input image(s) in a realistic way. Keep the input scene intact and place/replace the matching region with the style object, with correct perspective, lighting, scale, and shadows.
-
-${extra ? `Additional instructions:\n${extra}\n` : ''}`.trim();
 }
 
 function applyAdvancedInterpretation(userPrompt: string, variant: 'A' | 'B' | 'C', faceIdentityMode: boolean) {
@@ -560,6 +538,39 @@ export async function enhancePromptText(prompt: string) {
   return enhancedPrompt;
 }
 
+export async function generate3PromptVariantsText(prompt: string) {
+  const apiKey = getGeminiApiKey();
+  if (!apiKey) {
+    throw new Error('Gemini API key is not configured.');
+  }
+
+  const response = await callGeminiText(prompt, apiKey, PROMPT_VARIANTS_SYSTEM_PROMPT, 900);
+  const text = extractGeminiText(response);
+  if (!text) {
+    throw new Error('Prompt variants generator did not return text.');
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error('Prompt variants generator returned invalid JSON.');
+  }
+
+  if (!Array.isArray(parsed)) {
+    throw new Error('Prompt variants generator returned invalid shape.');
+  }
+
+  return parsed
+    .slice(0, 3)
+    .map((item, index) => ({
+      variant: String((item as any)?.variant || `Varianta ${index + 1}`),
+      approach: String((item as any)?.approach || ''),
+      prompt: String((item as any)?.prompt || '').trim(),
+    }))
+    .filter((item) => item.prompt);
+}
+
 function isMockAsset(asset: Asset | undefined): boolean {
   if (!asset) return true;
   const url = asset.url || '';
@@ -588,6 +599,9 @@ export async function runLivePhotoDirectorJob(snapshot: WorkspaceSnapshot, job: 
   const outputCount = Math.max(1, Math.min(Number(input.outputCount ?? 1), 4));
   const useSourceImage = Boolean(input.useSourceImage);
   const useReferenceImages = Boolean(input.useReferenceImages);
+  const temporaryReferenceAssetIds = Array.isArray(input.temporaryReferenceAssetIds)
+    ? input.temporaryReferenceAssetIds.map((assetId) => String(assetId)).filter(Boolean)
+    : [];
   const providerConfig = resolvePhotoDirectorProvider(String(input.modelId || ''));
   if (
     (providerConfig.provider === 'gemini' && !getGeminiApiKey()) ||
@@ -606,7 +620,7 @@ export async function runLivePhotoDirectorJob(snapshot: WorkspaceSnapshot, job: 
   const sourceAsset = useSourceImage
     ? (snapshot.assets.find((asset) => asset.id === sourceVersion?.assetId) ?? snapshot.assets[0])
     : undefined;
-  const referenceAssets = useReferenceImages ? collectReferenceAssets(snapshot) : [];
+  const referenceAssets = useReferenceImages ? collectReferenceAssets(snapshot, temporaryReferenceAssetIds) : [];
   const createdAt = new Date().toISOString();
   // Detect if user has a real uploaded image or only mock placeholder
   const hasMockSource = !useSourceImage || isMockAsset(sourceAsset);
@@ -624,7 +638,10 @@ export async function runLivePhotoDirectorJob(snapshot: WorkspaceSnapshot, job: 
   const qaList: QualityEvaluation[] = [];
   const outputVersionIds: string[] = [];
 
-  for (let index = 0; index < outputCount; index += 1) {
+  const generationIndices = Array.from({ length: outputCount }, (_, index) => index);
+
+  for (const chunk of chunkBatchItems(generationIndices)) {
+    for (const index of chunk) {
     const providerImages: ProviderImageInput[] = [];
 
     // Only include source image if it's a real user-uploaded image (not mock placeholder)
@@ -646,14 +663,33 @@ export async function runLivePhotoDirectorJob(snapshot: WorkspaceSnapshot, job: 
     const prompt = useTextToImage
       ? composeTextToImagePrompt(instruction || 'a beautiful professional product photograph', index, outputCount)
       : composePhotoDirectorPrompt(input, snapshot, index);
-    const mappedAspectRatio = mapPhotoDirectorAspectRatio(input.aspectRatio);
-    const generated = await generatePhotoDirectorProviderImage({
-      provider: providerConfig.provider,
-      images: providerImages,
-      prompt,
-      aspectRatio: mappedAspectRatio,
-      preferredModel: providerConfig.preferredModel,
-    });
+    const mappedAspectRatio = mapAspectRatioForProvider(input.aspectRatio, providerConfig.provider);
+    let generated: Awaited<ReturnType<typeof generatePhotoDirectorProviderImage>> | null = null;
+    let retryCount = 0;
+    const maxRetries = 3;
+
+    while (retryCount <= maxRetries && !generated) {
+      try {
+        generated = await generatePhotoDirectorProviderImage({
+          provider: providerConfig.provider,
+          images: providerImages,
+          prompt,
+          aspectRatio: mappedAspectRatio.value,
+          preferredModel: providerConfig.preferredModel,
+        });
+      } catch (error) {
+        if (!isRetriableProviderError(error) || retryCount >= maxRetries) {
+          throw error;
+        }
+        retryCount += 1;
+        const waitTime = getRetryBackoffMs(providerConfig.provider, retryCount);
+        await new Promise((resolve) => setTimeout(resolve, waitTime));
+      }
+    }
+
+    if (!generated) {
+      throw new Error('Provider did not return a generated image.');
+    }
     const generatedDataUrl = generated.imageBase64;
     const resolvedModelName = generated.modelId;
 
@@ -684,11 +720,12 @@ export async function runLivePhotoDirectorJob(snapshot: WorkspaceSnapshot, job: 
           prompt,
           storagePath: uploaded.storagePath,
           resolution: sourceAsset?.width && sourceAsset?.height ? `${sourceAsset.width}x${sourceAsset.height}` : undefined,
-          aspectRatio: String(input.aspectRatio ?? 'original'),
+          aspectRatio: mappedAspectRatio.original,
           params: {
             provider: generated.provider,
             model: resolvedModelName,
             polishMode: input.polishMode ?? 'focused',
+            mappedAspectRatio: mappedAspectRatio.value,
           },
         });
       } catch (error) {
@@ -712,8 +749,9 @@ export async function runLivePhotoDirectorJob(snapshot: WorkspaceSnapshot, job: 
         persistedToSupabase,
         provider: generated.provider,
         model: resolvedModelName,
-        aspectRatio: input.aspectRatio ?? 'original',
+        aspectRatio: mappedAspectRatio.original,
         polishMode: input.polishMode ?? 'focused',
+        mappedAspectRatio: mappedAspectRatio.value,
       },
     });
 
@@ -733,6 +771,7 @@ export async function runLivePhotoDirectorJob(snapshot: WorkspaceSnapshot, job: 
         liveProvider: true,
         provider: generated.provider,
         model: resolvedModelName,
+        mappedAspectRatio: mappedAspectRatio.value,
       },
     });
 
@@ -778,6 +817,7 @@ export async function runLivePhotoDirectorJob(snapshot: WorkspaceSnapshot, job: 
     });
 
     outputVersionIds.push(versionId);
+  }
   }
 
   return {

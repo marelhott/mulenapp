@@ -9,6 +9,8 @@ type AssetLibraryPopoverProps = {
   onUploadFile: (file: File) => void;
   children: ReactNode;
   placement?: 'right' | 'left';
+  includeSamples?: boolean;
+  openOnHover?: boolean;
 };
 
 export function AssetLibraryPopover(props: AssetLibraryPopoverProps) {
@@ -50,6 +52,7 @@ export function AssetLibraryPopover(props: AssetLibraryPopoverProps) {
 
   const galleryItems = useMemo(() => {
     const items = [...libraryAssets];
+    if (props.includeSamples === false) return items;
     if (items.length >= 10) return items;
     const existingUrls = new Set(items.map((asset) => asset.url));
     for (const sample of sampleAssets) {
@@ -58,7 +61,7 @@ export function AssetLibraryPopover(props: AssetLibraryPopoverProps) {
       items.push(sample);
     }
     return items;
-  }, [libraryAssets, sampleAssets]);
+  }, [libraryAssets, props.includeSamples, sampleAssets]);
 
   const popoverStyle = useMemo(() => {
     if (!open || !anchorRef.current || typeof window === 'undefined') return undefined;
@@ -95,20 +98,36 @@ export function AssetLibraryPopover(props: AssetLibraryPopoverProps) {
       setOpen(false);
     };
 
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+
     window.addEventListener('pointerdown', handlePointerDown);
-    return () => window.removeEventListener('pointerdown', handlePointerDown);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
   }, [open]);
 
   return (
     <div
       ref={anchorRef}
       className="asset-library-anchor"
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
+      onMouseEnter={() => {
+        if (props.openOnHover !== false) setOpen(true);
+      }}
+      onClick={() => {
+        if (props.openOnHover === false) setOpen((current) => !current);
+      }}
     >
       {props.children}
       {open ? (
-        <div className="asset-library-popover" style={popoverStyle}>
+        <div
+          className="asset-library-popover"
+          style={popoverStyle}
+          onClick={(event) => event.stopPropagation()}
+        >
           <label
             className="asset-library-upload-tile"
             onDragOver={(event) => event.preventDefault()}
@@ -145,7 +164,6 @@ export function AssetLibraryPopover(props: AssetLibraryPopoverProps) {
                       : 'asset-library-tile'
                 }
                 type="button"
-                disabled={isPlaceholder}
                 onClick={() => {
                   props.onSelectAsset(asset);
                   setOpen(false);

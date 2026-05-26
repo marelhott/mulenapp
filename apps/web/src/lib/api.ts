@@ -66,6 +66,7 @@ export const api = {
     sourceVersionId?: string;
     useSourceImage?: boolean;
     useReferenceImages?: boolean;
+    temporaryReferenceAssetIds?: string[];
     modelId?: string;
   }) {
     return requestJson<GenerationJob>('/jobs', {
@@ -103,6 +104,12 @@ export const api = {
   },
   enhancePrompt(input: { prompt: string }) {
     return requestJson<{ ok: true; prompt: string }>('/prompt/enhance', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+  generatePromptVariants(input: { prompt: string }) {
+    return requestJson<{ ok: true; variants: Array<{ variant: string; approach: string; prompt: string }> }>('/prompt/variants', {
       method: 'POST',
       body: JSON.stringify(input),
     });
