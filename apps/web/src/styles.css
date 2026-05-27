@@ -4439,6 +4439,14 @@ button.primary:hover {
   color: #8a918b;
 }
 
+.nano-model-provider-description {
+  margin: 0;
+  padding: 0 6px 6px;
+  color: #5f685f;
+  font-size: 9px;
+  line-height: 1.45;
+}
+
 .nano-model-provider-title em {
   font-style: normal;
   font-size: 7px;
@@ -4548,6 +4556,132 @@ button.primary:hover {
   font-size: 9px;
   line-height: 1.45;
   color: #69716b;
+}
+
+.nano-provider-shell-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(47, 58, 52, 0.1);
+  background: #ffffff;
+}
+
+.nano-provider-shell-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.nano-provider-shell-head p,
+.nano-provider-shell-head strong,
+.nano-provider-shell-head span {
+  margin: 0;
+}
+
+.nano-provider-shell-head p {
+  color: #707973;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.nano-provider-shell-head strong {
+  display: block;
+  margin-top: 4px;
+  color: #1e231f;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.nano-provider-shell-head span {
+  color: #5e665f;
+  font-size: 9px;
+  line-height: 1.4;
+}
+
+.nano-provider-shell-description {
+  margin: 0;
+  color: #5c655f;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.nano-provider-mode-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.nano-provider-mode-chip {
+  display: grid;
+  gap: 3px;
+  text-align: left;
+  padding: 10px 12px;
+  border: 1px solid rgba(47, 58, 52, 0.1);
+  border-radius: 12px;
+  background: #fbfbf8;
+}
+
+.nano-provider-mode-chip.active {
+  border-color: rgba(126, 217, 87, 0.42);
+  background: rgba(126, 217, 87, 0.08);
+}
+
+.nano-provider-mode-chip strong {
+  color: #202521;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.nano-provider-mode-chip span {
+  color: #5f685f;
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.nano-provider-shell-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.nano-provider-shell-foot > span {
+  color: #6a726c;
+  font-size: 9px;
+  line-height: 1.4;
+}
+
+.nano-provider-grounding-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 0 10px 0 6px;
+  border: 1px solid rgba(47, 58, 52, 0.12);
+  border-radius: 999px;
+  background: #fafaf7;
+  color: #333933;
+}
+
+.nano-provider-grounding-toggle i {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #d5dbd2;
+  transition: background 160ms ease;
+}
+
+.nano-provider-grounding-toggle.active i {
+  background: #7ed957;
+}
+
+.nano-provider-grounding-toggle b {
+  font-size: 9px;
+  font-weight: 700;
 }
 
 .nano-mini-actions button {
@@ -6004,4 +6138,102 @@ select,
   color: #7a817a;
   font-size: 12px;
   line-height: 1.6;
+}
+
+.mag-modal-lineage-grid,
+.mag-modal-compare-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.mag-modal-lineage-card {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(47, 58, 52, 0.1);
+  background: #fbfbf8;
+}
+
+.mag-modal-lineage-card strong {
+  color: #657068;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.mag-modal-lineage-card span {
+  color: #1f2420;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.mag-modal-compare-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.mag-modal-compare-hero {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.mag-modal-compare-card {
+  display: grid;
+  gap: 8px;
+}
+
+.mag-modal-compare-card strong {
+  color: #66706a;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.mag-modal-compare-card img,
+.mag-modal-compare-empty {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: 14px;
+  border: 1px solid rgba(47, 58, 52, 0.08);
+  background: #f6f7f2;
+}
+
+.mag-modal-compare-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  color: #6a726c;
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.mag-modal-compare-strip {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.mag-modal-compare-thumb {
+  flex: 0 0 78px;
+  width: 78px;
+  height: 78px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(47, 58, 52, 0.08);
+  background: #f4f5ef;
+}
+
+.mag-modal-compare-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }

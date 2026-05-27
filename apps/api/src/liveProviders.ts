@@ -202,6 +202,7 @@ async function generateOpenAIProviderImage(params: {
   images: ProviderImageInput[];
   prompt: string;
   aspectRatio: string;
+  providerMode?: 'fast' | 'balanced' | 'quality';
 }) {
   const apiKey = getOpenAiApiKey();
   if (!apiKey) throw new Error('OpenAI API key is not configured.');
@@ -232,7 +233,7 @@ async function generateOpenAIProviderImage(params: {
               form.set('prompt', params.prompt);
               form.set('n', '1');
               form.set('size', size);
-              form.set('quality', 'high');
+              form.set('quality', params.providerMode === 'fast' ? 'medium' : 'high');
               const first = params.images[0];
               const blob = dataUrlToBlob(first.data);
               const ext = (first.mimeType || blob.type || 'image/png').split('/')[1] || 'png';
@@ -251,7 +252,7 @@ async function generateOpenAIProviderImage(params: {
               prompt: params.prompt,
               n: 1,
               size,
-              quality: 'high',
+              quality: params.providerMode === 'fast' ? 'medium' : 'high',
             }),
           },
     );
@@ -279,6 +280,7 @@ async function generateFluxProProviderImage(params: {
   images: ProviderImageInput[];
   prompt: string;
   aspectRatio: string;
+  providerMode?: 'fast' | 'balanced' | 'quality';
 }) {
   const input: Record<string, unknown> = {
     prompt: params.prompt,
@@ -287,12 +289,12 @@ async function generateFluxProProviderImage(params: {
     num_images: 1,
     safety_tolerance: 5,
     enable_safety_checker: false,
-    raw: false,
+    raw: params.providerMode === 'fast',
   };
 
   if (params.images.length > 0) {
     input.image_url = params.images[0].data;
-    input.image_prompt_strength = 0.1;
+    input.image_prompt_strength = params.providerMode === 'quality' ? 0.08 : params.providerMode === 'fast' ? 0.15 : 0.1;
   }
 
   const outputs = await runFalModelQueued('fal-ai/flux-pro/v1.1-ultra', input);
@@ -309,6 +311,8 @@ async function generatePhotoDirectorProviderImage(params: {
   images: ProviderImageInput[];
   prompt: string;
   aspectRatio: string;
+  useGrounding?: boolean;
+  providerMode?: 'fast' | 'balanced' | 'quality';
   preferredModel?: string;
 }) {
   if (params.provider === 'chatgpt') {
@@ -637,11 +641,38 @@ function composeTextToImagePrompt(instruction: string, index: number, outputCoun
   return `${cleanInstruction}${variationHint}`.trim();
 }
 
+function applyProviderModeToPrompt(
+  prompt: string,
+  provider: PhotoDirectorProvider,
+  providerMode: 'fast' | 'balanced' | 'quality',
+) {
+  if (providerMode === 'balanced') return prompt;
+
+  if (provider === 'gemini') {
+    if (providerMode === 'fast') return `${prompt}\n\nPrioritize a quick clean draft over micro-detailing.`;
+    return `${prompt}\n\nPrioritize high fidelity, stronger prompt adherence and cleaner finishing details.`;
+  }
+
+  if (provider === 'chatgpt') {
+    if (providerMode === 'fast') return `${prompt}\n\nCreate a faster draft render with reduced refinement.`;
+    return `${prompt}\n\nAim for a premium polished final render with crisp details and stronger finish.`;
+  }
+
+  if (providerMode === 'fast') return `${prompt}\n\nKeep the render efficient and compositionally simple.`;
+  return `${prompt}\n\nOptimize for a premium final image with cleaner materials and stronger finish.`;
+}
+
 export async function runLivePhotoDirectorJob(snapshot: WorkspaceSnapshot, job: GenerationJob): Promise<WorkspaceSnapshot> {
   const input = (job.input ?? {}) as Record<string, unknown>;
   const outputCount = Math.max(1, Math.min(Number(input.outputCount ?? 1), 4));
   const useSourceImage = Boolean(input.useSourceImage);
   const useReferenceImages = Boolean(input.useReferenceImages);
+  const useGrounding = Boolean(input.useGrounding);
+  const providerMode = String(input.providerMode || 'balanced') === 'fast'
+    ? 'fast'
+    : String(input.providerMode || 'balanced') === 'quality'
+      ? 'quality'
+      : 'balanced';
   const temporaryReferenceAssetIds = Array.isArray(input.temporaryReferenceAssetIds)
     ? input.temporaryReferenceAssetIds.map((assetId) => String(assetId)).filter(Boolean)
     : [];
@@ -706,6 +737,7 @@ export async function runLivePhotoDirectorJob(snapshot: WorkspaceSnapshot, job: 
     const prompt = useTextToImage
       ? composeTextToImagePrompt(instruction || 'a beautiful professional product photograph', index, outputCount)
       : composePhotoDirectorPrompt(input, snapshot, index);
+    const providerPrompt = applyProviderModeToPrompt(prompt, providerConfig.provider, providerMode);
     const mappedAspectRatio = mapAspectRatioForProvider(input.aspectRatio, providerConfig.provider);
     let generated: Awaited<ReturnType<typeof generatePhotoDirectorProviderImage>> | null = null;
     let retryCount = 0;
@@ -716,8 +748,10 @@ export async function runLivePhotoDirectorJob(snapshot: WorkspaceSnapshot, job: 
         generated = await generatePhotoDirectorProviderImage({
           provider: providerConfig.provider,
           images: providerImages,
-          prompt,
+          prompt: providerPrompt,
           aspectRatio: mappedAspectRatio.value,
+          useGrounding,
+          providerMode,
           preferredModel: providerConfig.preferredModel,
         });
       } catch (error) {
@@ -768,6 +802,8 @@ export async function runLivePhotoDirectorJob(snapshot: WorkspaceSnapshot, job: 
             provider: generated.provider,
             model: resolvedModelName,
             polishMode: input.polishMode ?? 'focused',
+            providerMode,
+            useGrounding,
             mappedAspectRatio: mappedAspectRatio.value,
           },
         });
@@ -794,6 +830,8 @@ export async function runLivePhotoDirectorJob(snapshot: WorkspaceSnapshot, job: 
         model: resolvedModelName,
         aspectRatio: mappedAspectRatio.original,
         polishMode: input.polishMode ?? 'focused',
+        providerMode,
+        useGrounding,
         mappedAspectRatio: mappedAspectRatio.value,
       },
     });
@@ -814,6 +852,8 @@ export async function runLivePhotoDirectorJob(snapshot: WorkspaceSnapshot, job: 
         liveProvider: true,
         provider: generated.provider,
         model: resolvedModelName,
+        providerMode,
+        useGrounding,
         mappedAspectRatio: mappedAspectRatio.value,
       },
     });
@@ -824,7 +864,7 @@ export async function runLivePhotoDirectorJob(snapshot: WorkspaceSnapshot, job: 
       fromVersionId: sourceVersion?.id,
       toVersionIds: [versionId],
       userInstruction: String(input.instruction || ''),
-      agentSummary: 'Generated a new Photo Director branch through the live Gemini image edit flow.',
+      agentSummary: `Generated a new Photo Director branch through the live ${generated.provider} provider flow.`,
       lockedAreaIds: snapshot.lockedAreas.map((area) => area.id),
       visualCanonId: snapshot.visualCanon.id,
       createdAt,
@@ -836,7 +876,7 @@ export async function runLivePhotoDirectorJob(snapshot: WorkspaceSnapshot, job: 
       jobId: job.id,
       provider: generated.provider,
       model: resolvedModelName,
-      inputPrompt: prompt,
+      inputPrompt: providerPrompt,
       inputAssetIds: [sourceVersion?.assetId, ...referenceAssets.map((asset) => asset.id)].filter(Boolean) as string[],
       outputAssetId: assetId,
       status: 'succeeded',

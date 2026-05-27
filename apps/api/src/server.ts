@@ -34,6 +34,8 @@ type CreateJobBody = {
   outputCount?: number;
   aspectRatio?: 'original' | 'square' | 'portrait' | 'landscape';
   polishMode?: 'focused' | 'balanced' | 'bold';
+  providerMode?: 'fast' | 'balanced' | 'quality';
+  useGrounding?: boolean;
   sourceVersionId?: string;
   temporaryReferenceAssetIds?: string[];
   input?: Record<string, unknown>;
@@ -435,6 +437,8 @@ app.post<{ Body: CreateJobBody }>('/jobs', async (request, reply) => {
       outputCount: body.outputCount ?? body.input?.outputCount ?? 1,
       aspectRatio: body.aspectRatio ?? body.input?.aspectRatio ?? 'original',
       polishMode: body.polishMode ?? body.input?.polishMode ?? 'focused',
+      providerMode: body.providerMode ?? body.input?.providerMode ?? 'balanced',
+      useGrounding: body.useGrounding ?? body.input?.useGrounding ?? false,
       sourceVersionId: body.sourceVersionId ?? body.input?.sourceVersionId,
       temporaryReferenceAssetIds: body.temporaryReferenceAssetIds ?? body.input?.temporaryReferenceAssetIds,
     },

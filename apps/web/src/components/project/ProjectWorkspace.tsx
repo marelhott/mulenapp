@@ -81,8 +81,10 @@ const SAVED_PROMPTS_STORAGE_KEY = 'mulen-saved-prompts';
 const SELECTED_IMAGE_MODEL_STORAGE_KEY = 'mulen-selected-image-model';
 const PROMPT_HISTORY_STORAGE_KEY = 'mulen-prompt-history-v1';
 const PHOTO_DIRECTOR_INPUT_ASSET_IDS_STORAGE_KEY = 'mulen-photo-director-input-assets-v1';
+const PHOTO_DIRECTOR_PROVIDER_SETTINGS_STORAGE_KEY = 'mulen-photo-director-provider-settings-v1';
 
 type PhotoDirectorProviderUi = 'gemini' | 'chatgpt' | 'flux_pro' | 'grok' | 'replicate';
+type ProviderMode = 'fast' | 'balanced' | 'quality';
 
 type ImageModelPreset = {
   id: string;
@@ -98,10 +100,20 @@ type ProviderShellGroup = {
   id: string;
   name: string;
   icon: string;
+  description: string;
+  live: boolean;
   supportsGrounding: boolean;
   maxImages: number;
+  defaultMode: ProviderMode;
+  modes: Array<{
+    id: ProviderMode;
+    label: string;
+    description: string;
+  }>;
   models: ImageModelPreset[];
 };
+
+type ProviderShellSettings = Record<string, { mode: ProviderMode; grounding: boolean }>;
 
 const FALLBACK_IMAGE_MODEL_PRESETS: ImageModelPreset[] = [
   { id: 'gemini-flash', provider: 'gemini', providerLabel: 'Gemini', title: 'Nano 2', subtitle: 'Gemini 3.1 Flash', supportsGrounding: true, maxImages: 10 },
@@ -115,8 +127,16 @@ const FALLBACK_PROVIDER_CATALOG: ProviderCatalogItem[] = [
     id: 'gemini',
     name: 'Gemini',
     icon: 'gemini',
+    description: 'Best for flexible text-plus-image direction, references and grounded edits.',
+    live: true,
     supportsGrounding: true,
     maxImages: 10,
+    defaultMode: 'balanced',
+    modes: [
+      { id: 'fast', label: 'Fast', description: 'Lighter, quicker iterations for broad exploration.' },
+      { id: 'balanced', label: 'Balanced', description: 'Best default for most Photo Director edits.' },
+      { id: 'quality', label: 'Quality', description: 'More deliberate, reference-aware rendering.' },
+    ],
     models: [
       { id: 'gemini-flash', label: 'Nano 2', category: 'image' },
       { id: 'gemini-pro', label: 'Nano Pro', category: 'image' },
@@ -126,32 +146,64 @@ const FALLBACK_PROVIDER_CATALOG: ProviderCatalogItem[] = [
     id: 'chatgpt',
     name: 'ChatGPT',
     icon: 'chatgpt',
+    description: 'Strong single-image clean renders and dependable prompt following.',
+    live: true,
     supportsGrounding: false,
     maxImages: 1,
+    defaultMode: 'quality',
+    modes: [
+      { id: 'fast', label: 'Fast', description: 'Quicker draft render with lighter quality constraints.' },
+      { id: 'balanced', label: 'Balanced', description: 'Stable edit mode with standard polish.' },
+      { id: 'quality', label: 'Quality', description: 'Highest quality pass for one focused output.' },
+    ],
     models: [{ id: 'openai-image', label: 'GPT Img 2', category: 'image' }],
   },
   {
     id: 'flux_pro',
     name: 'FLUX Pro',
     icon: 'flux',
+    description: 'Commercial-quality direct render suited for polished hero outputs.',
+    live: true,
     supportsGrounding: false,
     maxImages: 4,
+    defaultMode: 'quality',
+    modes: [
+      { id: 'fast', label: 'Fast', description: 'Looser render prioritizing turnaround speed.' },
+      { id: 'balanced', label: 'Balanced', description: 'Good mix of structure and atmosphere.' },
+      { id: 'quality', label: 'Quality', description: 'Best finish for polished marketing imagery.' },
+    ],
     models: [{ id: 'flux-pro', label: 'Flux Pro', category: 'image' }],
   },
   {
     id: 'grok',
     name: 'Grok',
     icon: 'grok',
+    description: 'Prepared shell for future multimodal experiments and comparison runs.',
+    live: false,
     supportsGrounding: false,
     maxImages: 1,
+    defaultMode: 'balanced',
+    modes: [
+      { id: 'fast', label: 'Fast', description: 'Reserved for lightweight future test runs.' },
+      { id: 'balanced', label: 'Balanced', description: 'Default comparison mode once enabled.' },
+      { id: 'quality', label: 'Quality', description: 'Reserved for highest-quality comparison mode.' },
+    ],
     models: [],
   },
   {
     id: 'replicate',
     name: 'Replicate',
     icon: 'replicate',
+    description: 'Prepared shell for specialist third-party models and experiments.',
+    live: false,
     supportsGrounding: false,
     maxImages: 8,
+    defaultMode: 'balanced',
+    modes: [
+      { id: 'fast', label: 'Fast', description: 'For lightweight experimental model runs.' },
+      { id: 'balanced', label: 'Balanced', description: 'Default mode for future Replicate routing.' },
+      { id: 'quality', label: 'Quality', description: 'Reserved for heavier premium model passes.' },
+    ],
     models: [],
   },
 ];
@@ -214,6 +266,19 @@ function getProviderGroupSummary(group: ProviderShellGroup) {
   if (!group.models.length) return 'Coming soon';
   if (group.supportsGrounding) return `Grounding · max ${group.maxImages}`;
   return `Direct render · max ${group.maxImages}`;
+}
+
+function normalizeProviderSettings(
+  settings: ProviderShellSettings | null | undefined,
+  providers: ProviderCatalogItem[],
+): ProviderShellSettings {
+  return Object.fromEntries(
+    providers.map((provider) => {
+      const current = settings?.[provider.id];
+      const mode = provider.modes.some((option) => option.id === current?.mode) ? current!.mode : provider.defaultMode;
+      return [provider.id, { mode, grounding: provider.supportsGrounding ? Boolean(current?.grounding) : false }];
+    }),
+  );
 }
 
 const MOCK_GENERATED_IMAGES = [
@@ -441,7 +506,7 @@ function MainCanvas(props: {
     cards: Array<{ id: string; versionId: string; url: string; label?: string; resolution: string; prompt: string; aspectRatio: string; modelLabel: string; createdAt: string }>;
     index: number;
   } | null>(null);
-  const [detailModalTab, setDetailModalTab] = useState<'details' | 'comments'>('details');
+  const [detailModalTab, setDetailModalTab] = useState<'details' | 'compare' | 'comments'>('details');
   const [modalRegeneratingVersionId, setModalRegeneratingVersionId] = useState<string | null>(null);
   const [modalReferenceAssetIds, setModalReferenceAssetIds] = useState<Record<string, string[]>>({});
 
@@ -658,6 +723,26 @@ function MainCanvas(props: {
         .filter((asset): asset is Asset => Boolean(asset))
     : [];
   const detailEditPrompt = detailCard ? (editPrompts[detailCard.versionId] ?? detailCard.prompt) : '';
+  const detailVersion = detailCard?.versionId
+    ? props.snapshot.versions.find((version: ImageVersion) => version.id === detailCard.versionId) ?? null
+    : null;
+  const detailJob = detailVersion
+    ? props.snapshot.jobs.find((job) => job.outputVersionIds.includes(detailVersion.id)) ?? null
+    : null;
+  const detailRuns = detailJob
+    ? props.snapshot.modelRuns.filter((run) => run.jobId === detailJob.id)
+    : [];
+  const detailPrimaryRun = detailRuns[0] ?? null;
+  const detailSourceVersion = detailVersion?.parentVersionId
+    ? props.snapshot.versions.find((version: ImageVersion) => version.id === detailVersion.parentVersionId) ?? null
+    : null;
+  const detailSourceAsset = detailSourceVersion ? getAsset(props.snapshot, detailSourceVersion) : null;
+  const detailRecipeBadges = [
+    detailJob?.input?.providerMode ? `Mode ${String(detailJob.input.providerMode)}` : null,
+    detailJob?.input?.promptMode ? `Prompt ${String(detailJob.input.promptMode)}` : null,
+    detailJob?.input?.useGrounding ? 'Grounding' : null,
+    detailPrimaryRun?.provider ? `Provider ${detailPrimaryRun.provider}` : null,
+  ].filter(Boolean) as string[];
 
   const handleDetailModalReferenceSelect = (versionId: string, asset: Asset) => {
     setModalReferenceAssetIds((current) => ({
@@ -1049,6 +1134,13 @@ function MainCanvas(props: {
                 </button>
                 <button
                   type="button"
+                  className={detailModalTab === 'compare' ? 'mag-modal-tab active' : 'mag-modal-tab'}
+                  onClick={() => setDetailModalTab('compare')}
+                >
+                  Compare
+                </button>
+                <button
+                  type="button"
                   className={detailModalTab === 'comments' ? 'mag-modal-tab active' : 'mag-modal-tab'}
                   onClick={() => setDetailModalTab('comments')}
                 >
@@ -1116,6 +1208,29 @@ function MainCanvas(props: {
                       {detailCard.aspectRatio && <span className="mag-modal-badge">{detailCard.aspectRatio}</span>}
                       {detailCard.modelLabel && <span className="mag-modal-badge">{detailCard.modelLabel}</span>}
                       {detailCard.resolution && <span className="mag-modal-badge">{detailCard.resolution}</span>}
+                      {detailRecipeBadges.map((badge) => <span key={badge} className="mag-modal-badge">{badge}</span>)}
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="mag-modal-section-title">Lineage</p>
+                    <div className="mag-modal-lineage-grid">
+                      <div className="mag-modal-lineage-card">
+                        <strong>Source</strong>
+                        <span>{detailSourceVersion?.label ?? 'No source parent'}</span>
+                      </div>
+                      <div className="mag-modal-lineage-card">
+                        <strong>References</strong>
+                        <span>{detailReferenceAssets.length || props.snapshot.visualCanon.referenceAssetIds.length}</span>
+                      </div>
+                      <div className="mag-modal-lineage-card">
+                        <strong>Outputs in run</strong>
+                        <span>{detailJob?.outputVersionIds.length ?? 1}</span>
+                      </div>
+                      <div className="mag-modal-lineage-card">
+                        <strong>Latency</strong>
+                        <span>{detailPrimaryRun?.latencyMs ? `${Math.round(detailPrimaryRun.latencyMs / 100) / 10}s` : 'n/a'}</span>
+                      </div>
                     </div>
                   </div>
 
@@ -1198,6 +1313,45 @@ function MainCanvas(props: {
                     </button>
                   </div>
                 </>
+              ) : detailModalTab === 'compare' ? (
+                <div className="mag-modal-compare-panel">
+                  <div className="mag-modal-compare-hero">
+                    <div className="mag-modal-compare-card">
+                      <strong>Current</strong>
+                      <img src={detailCard.url} alt={detailCard.label || detailCard.prompt} />
+                    </div>
+                    <div className="mag-modal-compare-card">
+                      <strong>Source</strong>
+                      {detailSourceAsset ? (
+                        <img src={detailSourceAsset.url} alt={detailSourceVersion?.label || 'Source image'} />
+                      ) : (
+                        <div className="mag-modal-compare-empty">No source image for this branch.</div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="mag-modal-compare-meta">
+                    <div className="mag-modal-lineage-card">
+                      <strong>Branch origin</strong>
+                      <span>{detailSourceVersion?.label ?? 'Generated from prompt only'}</span>
+                    </div>
+                    <div className="mag-modal-lineage-card">
+                      <strong>Model</strong>
+                      <span>{detailPrimaryRun?.model ?? detailCard.modelLabel ?? 'Unknown model'}</span>
+                    </div>
+                  </div>
+                  {detailReferenceAssets.length > 0 ? (
+                    <div>
+                      <p className="mag-modal-section-title">References used for next regenerate</p>
+                      <div className="mag-modal-compare-strip">
+                        {detailReferenceAssets.map((asset) => (
+                          <div key={asset.id} className="mag-modal-compare-thumb">
+                            <img src={asset.url} alt={asset.storagePath} />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
               ) : (
                 <div className="mag-modal-comments-empty">
                   <p>Comments budou navazovat později. Teď je detail panel připravený pro další editaci a regeneraci obrázku.</p>
@@ -1561,6 +1715,9 @@ function NanoLeftSidebar(props: {
   currentPromptHistoryEntryId: string | null;
   imageModelPresets: ImageModelPreset[];
   providerCatalog: ProviderCatalogItem[];
+  providerShellSettings: ProviderShellSettings;
+  onProviderModeChange?: (providerId: string, mode: ProviderMode) => void;
+  onProviderGroundingChange?: (providerId: string, enabled: boolean) => void;
   selectedModelId?: string;
   onModelSelect?: (modelId: string) => void;
 }) {
@@ -1589,14 +1746,24 @@ function NanoLeftSidebar(props: {
     id: provider.id,
     name: provider.name,
     icon: provider.icon,
+    description: provider.description,
+    live: provider.live,
     supportsGrounding: provider.supportsGrounding,
     maxImages: provider.maxImages,
+    defaultMode: provider.defaultMode,
+    modes: provider.modes,
     models: imageModelPresets.filter((preset) => preset.provider === provider.id),
   }));
   const selectedProviderGroup =
     providerGroups.find((group) => group.id === selectedModel?.provider) ??
     providerGroups.find((group) => group.models.some((model) => model.id === selectedModel?.id)) ??
     null;
+  const selectedProviderSettings = selectedProviderGroup
+    ? props.providerShellSettings[selectedProviderGroup.id] ?? {
+        mode: selectedProviderGroup.defaultMode,
+        grounding: false,
+      }
+    : null;
   const referenceOptions = [
     { id: 'A', label: 'Authentic', description: 'Keeps the output natural and closest to the original feel.', icon: Sparkles },
     { id: 'B', label: 'Enhance', description: 'Adds more polish, clarity and commercial finish.', icon: BadgePlus },
@@ -1777,10 +1944,11 @@ function NanoLeftSidebar(props: {
                   <div className="nano-model-provider-head">
                     <div className="nano-model-provider-title">
                       <strong>{group.name}</strong>
-                      <em className={group.models.length ? 'is-live' : 'is-soon'}>{group.models.length ? 'Live' : 'Coming soon'}</em>
+                      <em className={group.live ? 'is-live' : 'is-soon'}>{group.live ? 'Live' : 'Coming soon'}</em>
                     </div>
                     <span>{getProviderGroupSummary(group)}</span>
                   </div>
+                  <p className="nano-model-provider-description">{group.description}</p>
                   <div className="nano-model-provider-capabilities">
                     <span>{group.supportsGrounding ? 'Grounding' : 'Direct render'}</span>
                     <span>max {group.maxImages}</span>
@@ -1814,6 +1982,46 @@ function NanoLeftSidebar(props: {
             </div>
           ) : null}
         </div>
+        {selectedProviderGroup && selectedProviderSettings ? (
+          <div className="nano-provider-shell-card">
+            <div className="nano-provider-shell-head">
+              <div>
+                <p>Provider mode</p>
+                <strong>{selectedProviderGroup.name}</strong>
+              </div>
+              <span>{selectedProviderGroup.live ? 'Live routing' : 'Prepared shell'}</span>
+            </div>
+            <p className="nano-provider-shell-description">{selectedProviderGroup.description}</p>
+            <div className="nano-provider-mode-grid">
+              {selectedProviderGroup.modes.map((mode) => (
+                <button
+                  key={mode.id}
+                  type="button"
+                  className={selectedProviderSettings.mode === mode.id ? 'nano-provider-mode-chip active' : 'nano-provider-mode-chip'}
+                  onClick={() => props.onProviderModeChange?.(selectedProviderGroup.id, mode.id)}
+                >
+                  <strong>{mode.label}</strong>
+                  <span>{mode.description}</span>
+                </button>
+              ))}
+            </div>
+            <div className="nano-provider-shell-foot">
+              <span>Max {selectedProviderGroup.maxImages} outputs / run</span>
+              {selectedProviderGroup.supportsGrounding ? (
+                <button
+                  type="button"
+                  className={selectedProviderSettings.grounding ? 'nano-provider-grounding-toggle active' : 'nano-provider-grounding-toggle'}
+                  onClick={() => props.onProviderGroundingChange?.(selectedProviderGroup.id, !selectedProviderSettings.grounding)}
+                >
+                  <i aria-hidden="true" />
+                  <b>Grounding {selectedProviderSettings.grounding ? 'on' : 'off'}</b>
+                </button>
+              ) : (
+                <span>{selectedProviderGroup.models.length ? 'No grounding for this provider' : 'Awaiting frontend model wiring'}</span>
+              )}
+            </div>
+          </div>
+        ) : null}
         <div className="nano-count-picker">
           <p>{commandConfig.optionRowLabel}</p>
           <div className="nano-count-row">
@@ -3062,6 +3270,9 @@ export function ProjectWorkspace(props: {
   const [selectedModelId, setSelectedModelId] = useState<string>('gemini-flash');
   const [imageModelPresets, setImageModelPresets] = useState<ImageModelPreset[]>(FALLBACK_IMAGE_MODEL_PRESETS);
   const [providerCatalog, setProviderCatalog] = useState<ProviderCatalogItem[]>(FALLBACK_PROVIDER_CATALOG);
+  const [providerShellSettings, setProviderShellSettings] = useState<ProviderShellSettings>(() =>
+    normalizeProviderSettings(null, FALLBACK_PROVIDER_CATALOG),
+  );
   const [semanticReferencePrompt, setSemanticReferencePrompt] = useState('');
   const [semanticMixSelection, setSemanticMixSelection] = useState<Record<keyof PromptCategories, boolean>>(DEFAULT_SEMANTIC_MIX);
   const [semanticPromptVariants, setSemanticPromptVariants] = useState<Array<{ variant: string; approach: string; prompt: string }>>([]);
@@ -3314,6 +3525,33 @@ export function ProjectWorkspace(props: {
   }, [selectedModelId]);
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = window.localStorage.getItem(PHOTO_DIRECTOR_PROVIDER_SETTINGS_STORAGE_KEY);
+      const parsed = raw ? (JSON.parse(raw) as ProviderShellSettings) : null;
+      setProviderShellSettings(normalizeProviderSettings(parsed, providerCatalog));
+    } catch {
+      setProviderShellSettings(normalizeProviderSettings(null, providerCatalog));
+    }
+  }, [providerCatalog]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(PHOTO_DIRECTOR_PROVIDER_SETTINGS_STORAGE_KEY, JSON.stringify(providerShellSettings));
+  }, [providerShellSettings]);
+
+  useEffect(() => {
+    const selectedPreset = imageModelPresets.find((preset) => preset.id === selectedModelId);
+    if (!selectedPreset) return;
+    if (workspace.photoDirectorOutputCount <= selectedPreset.maxImages) return;
+    setWorkspace((current) => ({
+      ...current,
+      photoDirectorOutputCount: Math.min(current.photoDirectorOutputCount, selectedPreset.maxImages),
+    }));
+    setWorkspaceNote(`${selectedPreset.title} umi maximalne ${selectedPreset.maxImages} vystupu najednou, takze jsem pocet automaticky upravil.`);
+  }, [imageModelPresets, selectedModelId, workspace.photoDirectorOutputCount]);
+
+  useEffect(() => {
     setPhotoDirectorInputAssetIds((current) =>
       normalizePhotoDirectorInputAssetIds(current, workspace.assets, workspace.project.originalAssetId),
     );
@@ -3323,6 +3561,28 @@ export function ProjectWorkspace(props: {
     if (typeof window === 'undefined') return;
     window.localStorage.setItem(PHOTO_DIRECTOR_INPUT_ASSET_IDS_STORAGE_KEY, JSON.stringify(photoDirectorInputAssetIds));
   }, [photoDirectorInputAssetIds]);
+
+  const handleProviderModeChange = (providerId: string, mode: ProviderMode) => {
+    setProviderShellSettings((current) => ({
+      ...current,
+      [providerId]: {
+        mode,
+        grounding: current[providerId]?.grounding ?? false,
+      },
+    }));
+    setWorkspaceNote(`Provider ${providerCatalog.find((provider) => provider.id === providerId)?.name ?? providerId} prepnut do rezimu ${mode}.`);
+  };
+
+  const handleProviderGroundingChange = (providerId: string, enabled: boolean) => {
+    setProviderShellSettings((current) => ({
+      ...current,
+      [providerId]: {
+        mode: current[providerId]?.mode ?? providerCatalog.find((provider) => provider.id === providerId)?.defaultMode ?? 'balanced',
+        grounding: enabled,
+      },
+    }));
+    setWorkspaceNote(enabled ? 'Grounding je aktivni pro aktualni provider.' : 'Grounding je vypnuty pro aktualni provider.');
+  };
 
   useEffect(() => {
     const currentPrompt = getPromptValueForRoute(props.activeRoute, workspace).trim();
@@ -3827,6 +4087,11 @@ export function ProjectWorkspace(props: {
     const useReferenceImages = effectiveReferenceAssetIds
       .map((assetId) => workspace.assets.find((asset) => asset.id === assetId))
       .some((asset) => asset?.kind === 'reference' && !isMockLikeAsset(asset));
+    const effectiveModelId = options.modelId ?? selectedModelId;
+    const selectedPreset = imageModelPresets.find((preset) => preset.id === effectiveModelId);
+    const providerSettings = selectedPreset
+      ? providerShellSettings[selectedPreset.provider] ?? { mode: 'balanced' as ProviderMode, grounding: false }
+      : { mode: 'balanced' as ProviderMode, grounding: false };
     const aspectRatio = options.sourceVersionId
       ? ((sourceVersion?.metadata?.aspectRatio as 'original' | 'square' | 'portrait' | 'landscape' | undefined) ?? 'original')
       : resolvePhotoDirectorAspectRatio(useSourceImage);
@@ -3838,6 +4103,8 @@ export function ProjectWorkspace(props: {
       outputCount: options.outputCount,
       aspectRatio,
       polishMode: workspace.photoDirectorPolishMode,
+      providerMode: providerSettings.mode,
+      useGrounding: selectedPreset?.supportsGrounding ? providerSettings.grounding : false,
       promptMode,
       simpleLinkMode,
       advancedVariant,
@@ -3846,7 +4113,7 @@ export function ProjectWorkspace(props: {
       useSourceImage,
       useReferenceImages,
       temporaryReferenceAssetIds: options.referenceAssetIds?.length ? options.referenceAssetIds : undefined,
-      modelId: options.modelId ?? selectedModelId,
+      modelId: effectiveModelId,
     } satisfies Parameters<typeof api.createPhotoDirectorJob>[0];
   };
 
@@ -3870,21 +4137,84 @@ export function ProjectWorkspace(props: {
 
     try {
       let successCount = 0;
-      for (let index = 0; index < jobs.length; index += 1) {
-        const item = jobs[index];
-        const createdJob = await api.createPhotoDirectorJob(buildPhotoDirectorJobInput(item));
-        const finalJob = await waitForJob(createdJob.id, (progressJob) => {
-          setWorkspaceNote(`${item.progressLabel} ${index + 1}/${jobs.length}: ${progressJob.progress}%`);
-        });
-        if (finalJob.status === 'succeeded') {
-          successCount += 1;
-        } else {
-          setWorkspaceNote(`${item.progressLabel} ${index + 1}/${jobs.length} skoncil ve stavu ${finalJob.status}.`);
+      let completedCount = 0;
+      let failedCount = 0;
+      const chunkSize = Math.min(
+        4,
+        Math.max(...jobs.map((item) => imageModelPresets.find((preset) => preset.id === (item.modelId ?? selectedModelId))?.maxImages ?? 1), 1),
+      );
+      const chunks: typeof jobs[] = [];
+      for (let index = 0; index < jobs.length; index += chunkSize) {
+        chunks.push(jobs.slice(index, index + chunkSize));
+      }
+
+      const createBatchJobWithRetry = async (
+        item: (typeof jobs)[number],
+        absoluteIndex: number,
+      ): Promise<GenerationJob> => {
+        let attempts = 0;
+        while (true) {
+          try {
+            return await api.createPhotoDirectorJob(buildPhotoDirectorJobInput(item));
+          } catch (error) {
+            attempts += 1;
+            if (attempts >= 3) throw error;
+            const waitMs = 900 * Math.pow(2, attempts - 1);
+            setWorkspaceNote(`${item.progressLabel} ${absoluteIndex + 1}/${jobs.length}: fronta opakuje zalozeni jobu (${attempts}/3).`);
+            await new Promise((resolve) => window.setTimeout(resolve, waitMs));
+          }
         }
+      };
+
+      for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
+        const chunk = chunks[chunkIndex];
+        setWorkspaceNote(`Batch vlna ${chunkIndex + 1}/${chunks.length}: pripravuji ${chunk.length} joby.`);
+        const createdJobs = await Promise.all(
+          chunk.map((item, index) => createBatchJobWithRetry(item, chunkIndex * chunkSize + index).then((job) => ({ item, job }))),
+        );
+        const pendingJobs = new Map(createdJobs.map(({ item, job }) => [job.id, item]));
+        const finalStatuses = new Map<string, GenerationJob['status']>();
+
+        while (pendingJobs.size) {
+          const statuses = await Promise.all(
+            Array.from(pendingJobs.keys()).map(async (jobId) => {
+              const progressJob = await api.getJob(jobId);
+              return progressJob;
+            }),
+          );
+
+          let aggregatedProgress = 0;
+          statuses.forEach((progressJob) => {
+            aggregatedProgress += progressJob.progress || 0;
+            if (progressJob.status === 'succeeded' || progressJob.status === 'failed' || progressJob.status === 'partial' || progressJob.status === 'cancelled') {
+              finalStatuses.set(progressJob.id, progressJob.status);
+              pendingJobs.delete(progressJob.id);
+            }
+          });
+
+          const averageProgress = statuses.length ? Math.round(aggregatedProgress / statuses.length) : 100;
+          setWorkspaceNote(
+            `Batch vlna ${chunkIndex + 1}/${chunks.length}: hotovo ${completedCount + finalStatuses.size}/${jobs.length} · bezi ${pendingJobs.size} · ${averageProgress}%`,
+          );
+
+          if (pendingJobs.size) {
+            await new Promise((resolve) => window.setTimeout(resolve, 650));
+          }
+        }
+
+        finalStatuses.forEach((status) => {
+          completedCount += 1;
+          if (status === 'succeeded') successCount += 1;
+          else failedCount += 1;
+        });
       }
 
       await syncWorkspaceFromApi();
-      setWorkspaceNote(successCount === jobs.length ? messages.success : messages.partial.replace('{count}', String(successCount)));
+      setWorkspaceNote(
+        successCount === jobs.length
+          ? messages.success
+          : `${messages.partial.replace('{count}', String(successCount))} Selhalo nebo bylo neplnych: ${failedCount}.`,
+      );
       return successCount;
     } catch (error) {
       setWorkspaceNote(error instanceof Error ? error.message : 'Batch generovani selhal.');
@@ -4568,6 +4898,10 @@ export function ProjectWorkspace(props: {
       if (props.apiConfig?.features.photoDirector) {
         const sourceVersion = workspace.versions.find((version) => version.id === sourceVersionId);
         const sourceAspectRatio = (sourceVersion?.metadata?.aspectRatio as 'original' | 'square' | 'portrait' | 'landscape' | undefined) ?? 'original';
+        const selectedPreset = imageModelPresets.find((preset) => preset.id === selectedModelId);
+        const providerSettings = selectedPreset
+          ? providerShellSettings[selectedPreset.provider] ?? { mode: 'balanced' as ProviderMode, grounding: false }
+          : { mode: 'balanced' as ProviderMode, grounding: false };
         const job = await api.createPhotoDirectorJob({
           projectId: workspace.project.id,
           instruction: prompt,
@@ -4575,6 +4909,8 @@ export function ProjectWorkspace(props: {
           outputCount: 1,
           aspectRatio: sourceAspectRatio,
           polishMode: workspace.photoDirectorPolishMode,
+          providerMode: providerSettings.mode,
+          useGrounding: selectedPreset?.supportsGrounding ? providerSettings.grounding : false,
           promptMode,
           simpleLinkMode,
           advancedVariant,
@@ -6187,6 +6523,9 @@ export function ProjectWorkspace(props: {
           currentPromptHistoryEntryId={currentPromptHistoryEntryId}
           imageModelPresets={imageModelPresets}
           providerCatalog={providerCatalog}
+          providerShellSettings={providerShellSettings}
+          onProviderModeChange={handleProviderModeChange}
+          onProviderGroundingChange={handleProviderGroundingChange}
           selectedModelId={selectedModelId}
           onModelSelect={setSelectedModelId}
         />

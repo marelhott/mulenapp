@@ -4,8 +4,16 @@ export type ProviderCatalogItem = {
   id: string;
   name: string;
   icon: string;
+  description: string;
+  live: boolean;
   supportsGrounding: boolean;
   maxImages: number;
+  defaultMode: 'fast' | 'balanced' | 'quality';
+  modes: Array<{
+    id: 'fast' | 'balanced' | 'quality';
+    label: string;
+    description: string;
+  }>;
   models: Array<{
     id: string;
     label: string;
@@ -84,6 +92,8 @@ export const api = {
     outputCount: number;
     aspectRatio: 'original' | 'square' | 'portrait' | 'landscape';
     polishMode: 'focused' | 'balanced' | 'bold';
+    providerMode?: 'fast' | 'balanced' | 'quality';
+    useGrounding?: boolean;
     promptMode?: 'simple' | 'advanced';
     simpleLinkMode?: 'style' | 'merge' | 'object' | null;
     advancedVariant?: 'A' | 'B' | 'C';
