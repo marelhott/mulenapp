@@ -1,5 +1,5 @@
 import { startTransition, useEffect, useRef, useState, useMemo } from 'react';
-import { ArrowLeft, BadgePlus, ChevronDown, Download, Flower2, FolderClosed, Grid2x2, ImageIcon, ImagePlus, ImageUp, List, PanelRight, PencilLine, RefreshCw, Save, Sparkles, Square, Trash2, UserRound, X } from 'lucide-react';
+import { ArrowLeft, BadgePlus, ChevronDown, Download, Flower2, FolderClosed, Grid2x2, ImageIcon, ImagePlus, ImageUp, List, PanelRight, PencilLine, RefreshCw, Save, SlidersHorizontal, Sparkles, Square, Trash2, UserRound, X } from 'lucide-react';
 import type {
   Asset,
   EditStep,
@@ -1999,8 +1999,8 @@ function NanoLeftSidebar(props: {
           ) : null}
         </div>
         {selectedProviderGroup && selectedProviderSettings ? (
-          <div className="nano-reference-block" ref={providerMenuRef}>
-            <strong>Provider mode</strong>
+          <div className="nano-reference-block nano-provider-inline-block" ref={providerMenuRef}>
+            <p>Provider mode</p>
             <button
               type="button"
               className={`nano-model-select-trigger nano-reference-select-trigger ${isProviderMenuOpen ? 'open' : ''}`}
@@ -2008,6 +2008,9 @@ function NanoLeftSidebar(props: {
               aria-haspopup="listbox"
               aria-expanded={isProviderMenuOpen}
             >
+              <span className="nano-model-select-leading" aria-hidden="true">
+                <SlidersHorizontal size={16} strokeWidth={2} />
+              </span>
               <span className="nano-model-select-copy">
                 <strong>{selectedProviderGroup.modes.find((mode) => mode.id === selectedProviderSettings.mode)?.label ?? 'Balanced'}</strong>
                 <small>
