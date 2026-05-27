@@ -1732,11 +1732,13 @@ function NanoLeftSidebar(props: {
   const brandSlotAsset = props.snapshot.assets.find((asset) => asset.id === props.snapshot.brandSlotAssetId);
   const [dragSection, setDragSection] = useState<'input' | 'style' | 'brand' | null>(null);
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
+  const [isProviderMenuOpen, setIsProviderMenuOpen] = useState(false);
   const [isReferenceMenuOpen, setIsReferenceMenuOpen] = useState(false);
   const [isAiPromptMenuOpen, setIsAiPromptMenuOpen] = useState(false);
   const [aiPromptPanel, setAiPromptPanel] = useState<'enhance' | 'semantic' | 'variants' | 'history'>('semantic');
   const promptToolbarRef = useRef<HTMLDivElement | null>(null);
   const modelMenuRef = useRef<HTMLDivElement | null>(null);
+  const providerMenuRef = useRef<HTMLDivElement | null>(null);
   const referenceMenuRef = useRef<HTMLDivElement | null>(null);
   const aiPromptMenuRef = useRef<HTMLDivElement | null>(null);
   const route = props.activeRoute;
@@ -1879,6 +1881,20 @@ function NanoLeftSidebar(props: {
   }, [isReferenceMenuOpen]);
 
   useEffect(() => {
+    if (!isProviderMenuOpen || typeof window === 'undefined') return;
+
+    const handlePointerDown = (event: MouseEvent | PointerEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (providerMenuRef.current?.contains(target)) return;
+      setIsProviderMenuOpen(false);
+    };
+
+    window.addEventListener('pointerdown', handlePointerDown);
+    return () => window.removeEventListener('pointerdown', handlePointerDown);
+  }, [isProviderMenuOpen]);
+
+  useEffect(() => {
     if (!isAiPromptMenuOpen || typeof window === 'undefined') return;
 
     const handlePointerDown = (event: MouseEvent | PointerEvent) => {
@@ -1983,43 +1999,67 @@ function NanoLeftSidebar(props: {
           ) : null}
         </div>
         {selectedProviderGroup && selectedProviderSettings ? (
-          <div className="nano-provider-shell-card">
-            <div className="nano-provider-shell-head">
-              <div>
-                <p>Provider mode</p>
-                <strong>{selectedProviderGroup.name}</strong>
+          <div className="nano-reference-block" ref={providerMenuRef}>
+            <strong>Provider mode</strong>
+            <button
+              type="button"
+              className={`nano-model-select-trigger nano-reference-select-trigger ${isProviderMenuOpen ? 'open' : ''}`}
+              onClick={() => setIsProviderMenuOpen((current) => !current)}
+              aria-haspopup="listbox"
+              aria-expanded={isProviderMenuOpen}
+            >
+              <span className="nano-model-select-copy">
+                <strong>{selectedProviderGroup.modes.find((mode) => mode.id === selectedProviderSettings.mode)?.label ?? 'Balanced'}</strong>
+                <small>
+                  {selectedProviderGroup.supportsGrounding
+                    ? `Grounding ${selectedProviderSettings.grounding ? 'on' : 'off'} · ${selectedProviderGroup.name}`
+                    : `${selectedProviderGroup.name} · max ${selectedProviderGroup.maxImages}`}
+                </small>
+              </span>
+              <span className="nano-model-select-chevron" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="m6 9 6 6 6-6" />
+                </svg>
+              </span>
+            </button>
+            {isProviderMenuOpen ? (
+              <div className="nano-model-select-menu nano-reference-select-menu nano-provider-select-menu" role="listbox" aria-label="Provider mode selection">
+                {selectedProviderGroup.modes.map((mode) => (
+                  <button
+                    key={mode.id}
+                    type="button"
+                    className={selectedProviderSettings.mode === mode.id ? 'nano-model-select-option active nano-reference-select-option' : 'nano-model-select-option nano-reference-select-option'}
+                    onClick={() => {
+                      props.onProviderModeChange?.(selectedProviderGroup.id, mode.id);
+                      setIsProviderMenuOpen(false);
+                    }}
+                    role="option"
+                    aria-selected={selectedProviderSettings.mode === mode.id}
+                  >
+                    <div className="nano-reference-select-option-copy">
+                      <strong>{mode.label}</strong>
+                      <span>{mode.description}</span>
+                    </div>
+                  </button>
+                ))}
+                {selectedProviderGroup.supportsGrounding ? (
+                  <button
+                    type="button"
+                    className="nano-provider-grounding-row"
+                    onClick={() => props.onProviderGroundingChange?.(selectedProviderGroup.id, !selectedProviderSettings.grounding)}
+                  >
+                    <div className="nano-reference-select-option-copy">
+                      <strong>Grounding {selectedProviderSettings.grounding ? 'on' : 'off'}</strong>
+                      <span>Use live search grounding for stronger factual context when Gemini needs it.</span>
+                    </div>
+                    <span className={selectedProviderSettings.grounding ? 'nano-provider-grounding-toggle active' : 'nano-provider-grounding-toggle'}>
+                      <i aria-hidden="true" />
+                      <b>{selectedProviderSettings.grounding ? 'On' : 'Off'}</b>
+                    </span>
+                  </button>
+                ) : null}
               </div>
-              <span>{selectedProviderGroup.live ? 'Live routing' : 'Prepared shell'}</span>
-            </div>
-            <p className="nano-provider-shell-description">{selectedProviderGroup.description}</p>
-            <div className="nano-provider-mode-grid">
-              {selectedProviderGroup.modes.map((mode) => (
-                <button
-                  key={mode.id}
-                  type="button"
-                  className={selectedProviderSettings.mode === mode.id ? 'nano-provider-mode-chip active' : 'nano-provider-mode-chip'}
-                  onClick={() => props.onProviderModeChange?.(selectedProviderGroup.id, mode.id)}
-                >
-                  <strong>{mode.label}</strong>
-                  <span>{mode.description}</span>
-                </button>
-              ))}
-            </div>
-            <div className="nano-provider-shell-foot">
-              <span>Max {selectedProviderGroup.maxImages} outputs / run</span>
-              {selectedProviderGroup.supportsGrounding ? (
-                <button
-                  type="button"
-                  className={selectedProviderSettings.grounding ? 'nano-provider-grounding-toggle active' : 'nano-provider-grounding-toggle'}
-                  onClick={() => props.onProviderGroundingChange?.(selectedProviderGroup.id, !selectedProviderSettings.grounding)}
-                >
-                  <i aria-hidden="true" />
-                  <b>Grounding {selectedProviderSettings.grounding ? 'on' : 'off'}</b>
-                </button>
-              ) : (
-                <span>{selectedProviderGroup.models.length ? 'No grounding for this provider' : 'Awaiting frontend model wiring'}</span>
-              )}
-            </div>
+            ) : null}
           </div>
         ) : null}
         <div className="nano-count-picker">

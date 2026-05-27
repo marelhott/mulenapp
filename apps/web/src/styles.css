@@ -4558,101 +4558,20 @@ button.primary:hover {
   color: #69716b;
 }
 
-.nano-provider-shell-card {
+.nano-provider-select-menu {
+  gap: 0;
+}
+
+.nano-provider-grounding-row {
+  width: 100%;
   display: grid;
-  gap: 10px;
-  padding: 12px 14px;
-  border-radius: 16px;
-  border: 1px solid rgba(47, 58, 52, 0.1);
-  background: #ffffff;
-}
-
-.nano-provider-shell-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.nano-provider-shell-head p,
-.nano-provider-shell-head strong,
-.nano-provider-shell-head span {
-  margin: 0;
-}
-
-.nano-provider-shell-head p {
-  color: #707973;
-  font-size: 8px;
-  font-weight: 800;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-}
-
-.nano-provider-shell-head strong {
-  display: block;
-  margin-top: 4px;
-  color: #1e231f;
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.nano-provider-shell-head span {
-  color: #5e665f;
-  font-size: 9px;
-  line-height: 1.4;
-}
-
-.nano-provider-shell-description {
-  margin: 0;
-  color: #5c655f;
-  font-size: 10px;
-  line-height: 1.5;
-}
-
-.nano-provider-mode-grid {
-  display: grid;
-  gap: 8px;
-}
-
-.nano-provider-mode-chip {
-  display: grid;
-  gap: 3px;
-  text-align: left;
-  padding: 10px 12px;
-  border: 1px solid rgba(47, 58, 52, 0.1);
-  border-radius: 12px;
-  background: #fbfbf8;
-}
-
-.nano-provider-mode-chip.active {
-  border-color: rgba(126, 217, 87, 0.42);
-  background: rgba(126, 217, 87, 0.08);
-}
-
-.nano-provider-mode-chip strong {
-  color: #202521;
-  font-size: 10px;
-  font-weight: 700;
-}
-
-.nano-provider-mode-chip span {
-  color: #5f685f;
-  font-size: 9px;
-  line-height: 1.45;
-}
-
-.nano-provider-shell-foot {
-  display: flex;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.nano-provider-shell-foot > span {
-  color: #6a726c;
-  font-size: 9px;
-  line-height: 1.4;
+  gap: 12px;
+  padding: 12px 16px;
+  border-top: 1px solid rgba(228, 228, 222, 0.72);
+  background: #fff;
+  text-align: left;
 }
 
 .nano-provider-grounding-toggle {
