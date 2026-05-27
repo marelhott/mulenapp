@@ -4805,9 +4805,9 @@ select,
   align-items: center;
   gap: 2px;
   height: 32px;
-  padding: 2px 6px;
-  background: #f0f0ee;
-  border-radius: 10px;
+  padding: 0;
+  background: transparent;
+  border-radius: 0;
 }
 
 .nano-creations-layout-switcher button {
@@ -4817,11 +4817,11 @@ select,
   width: 28px;
   height: 24px;
   border: 0;
-  border-radius: 7px;
+  border-radius: 0;
   background: transparent;
   color: #585d57;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition: color 0.15s, opacity 0.15s;
   opacity: 0.5;
   padding: 0;
 }
@@ -4831,18 +4831,17 @@ select,
 }
 
 .nano-creations-layout-switcher button.active {
-  background: #ffffff;
   color: #1a1a1a;
   opacity: 1;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  box-shadow: none;
 }
 
 .app-shell-dark .nano-creations-layout-switcher {
-  background: rgba(255,255,255,0.07);
+  background: transparent;
 }
 
 .app-shell-dark .nano-creations-layout-switcher button.active {
-  background: rgba(255,255,255,0.12);
+  background: transparent;
   color: #fff;
 }
 
