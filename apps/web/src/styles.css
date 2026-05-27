@@ -1457,7 +1457,7 @@ button.primary:hover {
 
 .nano-upload-box {
   width: 100%;
-  min-height: 88px;
+  min-height: 96px;
   border-radius: 8px;
   border: 1px dashed rgba(16, 16, 16, 0.2);
   background: #ffffff;
@@ -1465,7 +1465,7 @@ button.primary:hover {
   margin-top: 10px;
   color: #616161;
   overflow: hidden;
-  padding: 10px;
+  padding: 12px;
 }
 
 .nano-upload-box.dragging {
@@ -1475,6 +1475,7 @@ button.primary:hover {
 
 .nano-upload-box.has-asset {
   background: #ffffff;
+  min-height: 0;
 }
 
 .nano-upload-box-empty {
@@ -1499,20 +1500,22 @@ button.primary:hover {
 }
 
 .nano-upload-box-strip {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  align-items: start;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
   gap: 10px;
-  min-height: 82px;
+  min-height: 0;
 }
 
 .nano-upload-thumb {
   aspect-ratio: 1 / 1;
-  width: 100%;
+  width: 68px;
+  flex: 0 0 68px;
   border-radius: 8px;
   overflow: hidden;
   background: #f6f7f2;
   border: 1px solid rgba(16, 16, 16, 0.1);
+  position: relative;
 }
 
 .nano-upload-thumb-add {
@@ -1543,6 +1546,27 @@ button.primary:hover {
   height: 100%;
   object-fit: cover;
   display: block;
+}
+
+.nano-upload-thumb-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.94);
+  color: #3d3d3d;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+.nano-upload-thumb-remove:hover {
+  background: #ffffff;
+  color: #121212;
 }
 
 .nano-upload-section p {

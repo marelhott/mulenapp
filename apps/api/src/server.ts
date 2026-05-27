@@ -532,6 +532,54 @@ app.delete('/versions/:versionId', async (request, reply) => {
   return reply.code(204).send();
 });
 
+app.delete('/assets/:assetId', async (request, reply) => {
+  const params = request.params as { assetId: string };
+  await updateStore((current) => {
+    const snapshot = current.snapshot;
+    const asset = snapshot.assets.find((item) => item.id === params.assetId);
+    if (!asset) return current;
+
+    const versionIdsToRemove = new Set(
+      snapshot.versions.filter((version) => version.assetId === params.assetId).map((version) => version.id),
+    );
+    const remainingVersions = snapshot.versions.filter((version) => version.assetId !== params.assetId);
+    const remainingAssets = snapshot.assets.filter((item) => item.id !== params.assetId);
+    const fallbackOriginalAssetId =
+      snapshot.project.originalAssetId === params.assetId
+        ? remainingAssets.find((item) => item.kind === 'original')?.id
+        : snapshot.project.originalAssetId;
+    const fallbackActiveVersionId =
+      snapshot.project.activeVersionId && versionIdsToRemove.has(snapshot.project.activeVersionId)
+        ? (remainingVersions.find((version) => version.assetId === fallbackOriginalAssetId)?.id ??
+          remainingVersions.find((version) => version.module === 'photo-director')?.id ??
+          remainingVersions[0]?.id)
+        : snapshot.project.activeVersionId;
+
+    return {
+      ...current,
+      snapshot: {
+        ...snapshot,
+        assets: remainingAssets,
+        versions: remainingVersions,
+        jobs: snapshot.jobs.map((job) => ({
+          ...job,
+          outputVersionIds: job.outputVersionIds.filter((id) => !versionIdsToRemove.has(id)),
+        })),
+        visualCanon: {
+          ...snapshot.visualCanon,
+          referenceAssetIds: snapshot.visualCanon.referenceAssetIds.filter((id) => id !== params.assetId),
+        },
+        project: {
+          ...snapshot.project,
+          originalAssetId: fallbackOriginalAssetId,
+          activeVersionId: fallbackActiveVersionId,
+        },
+      },
+    };
+  });
+  return reply.code(204).send();
+});
+
 app.post<{ Body: CreateExportBody }>('/exports', async (request, reply) => {
   const body = request.body ?? {};
   const projectId = ensureProjectId(body.projectId);

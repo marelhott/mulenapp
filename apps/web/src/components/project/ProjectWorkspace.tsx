@@ -396,6 +396,51 @@ function getPhotoDirectorInputAssets(snapshot: WorkspaceState, assetIds: string[
     .filter((asset): asset is Asset => Boolean(asset));
 }
 
+function removeAssetFromWorkspaceState(
+  snapshot: WorkspaceState,
+  assetId: string,
+  slot: 'input' | 'style' | 'brand' | 'source-face' | 'target-scene',
+  remainingInputAssetIds: string[],
+) {
+  const nextAssets = snapshot.assets.filter((asset) => asset.id !== assetId);
+  const nextVersions = snapshot.versions.filter((version) => version.assetId !== assetId);
+  const nextOriginalAssetId =
+    slot === 'input' && snapshot.project.originalAssetId === assetId
+      ? remainingInputAssetIds[0]
+      : snapshot.project.originalAssetId;
+  const nextActiveVersionId =
+    slot === 'input' && snapshot.project.originalAssetId === assetId
+      ? (nextVersions.find((version) => version.assetId === nextOriginalAssetId)?.id ??
+        nextVersions.find((version) => version.id === snapshot.project.activeVersionId)?.id ??
+        nextVersions[0]?.id)
+      : snapshot.project.activeVersionId;
+
+  return {
+    ...snapshot,
+    assets: nextAssets,
+    versions: nextVersions,
+    jobs: snapshot.jobs.map((job) => ({
+      ...job,
+      outputVersionIds: job.outputVersionIds.filter((versionId) => nextVersions.some((version) => version.id === versionId)),
+    })),
+    visualCanon: {
+      ...snapshot.visualCanon,
+      referenceAssetIds: snapshot.visualCanon.referenceAssetIds.filter((id) => id !== assetId),
+    },
+    project: {
+      ...snapshot.project,
+      originalAssetId: nextOriginalAssetId,
+      activeVersionId: nextActiveVersionId,
+    },
+    styleSlotAssetId: slot === 'style' && snapshot.styleSlotAssetId === assetId ? undefined : snapshot.styleSlotAssetId,
+    brandSlotAssetId: slot === 'brand' && snapshot.brandSlotAssetId === assetId ? undefined : snapshot.brandSlotAssetId,
+    headswapSourceAssetId:
+      slot === 'source-face' && snapshot.headswapSourceAssetId === assetId ? undefined : snapshot.headswapSourceAssetId,
+    headswapTargetAssetId:
+      slot === 'target-scene' && snapshot.headswapTargetAssetId === assetId ? undefined : snapshot.headswapTargetAssetId,
+  };
+}
+
 function readPersistedPhotoDirectorInputAssetIds() {
   if (typeof window === 'undefined') return [] as string[];
   try {
@@ -1644,6 +1689,7 @@ function NanoLeftSidebar(props: {
   onHeadswapSourceUpload: (file: File) => void;
   onHeadswapTargetUpload: (file: File) => void;
   onSelectExistingAsset: (asset: Asset, slot: 'input' | 'style' | 'brand' | 'source-face' | 'target-scene') => void;
+  onRemoveSelectedAsset: (assetId: string, slot: 'input' | 'style' | 'brand' | 'source-face' | 'target-scene') => void;
   photoDirectorInputAssetIds: string[];
   onOutputCountChange: (value: number) => void;
   onGenerateAllModels: () => void;
@@ -2529,12 +2575,14 @@ function NanoLeftSidebar(props: {
               <UploadSection
                 asset={config.asset}
                 assets={config.assets ?? (config.asset ? [config.asset] : [])}
+                slot={config.mode}
                 count={config.count}
                 browseViaPopover
                 dragging={dragSection === config.dragKey}
                 onBrowse={() => document.getElementById(config.id)?.click()}
                 onDropFiles={(files) => handleFile(files, config.mode)}
                 onDragStateChange={(active) => setDragSection(active ? config.dragKey : null)}
+                onRemoveAsset={props.onRemoveSelectedAsset}
                 title={config.title}
                 helper={config.helper}
               />
@@ -2561,10 +2609,12 @@ function UploadSection(props: {
   dragging: boolean;
   asset?: Asset;
   assets?: Asset[];
+  slot: 'input' | 'style' | 'brand' | 'source-face' | 'target-scene';
   helper?: string;
   onBrowse: () => void;
   onDropFiles: (files: FileList) => void;
   onDragStateChange: (active: boolean) => void;
+  onRemoveAsset: (assetId: string, slot: 'input' | 'style' | 'brand' | 'source-face' | 'target-scene') => void;
   browseViaPopover?: boolean;
 }) {
   const visibleAssets = (props.assets ?? (props.asset ? [props.asset] : [])).slice(0, 4);
@@ -2602,6 +2652,17 @@ function UploadSection(props: {
             {visibleAssets.map((asset, index) => (
               <div key={asset.id} className="nano-upload-thumb" title={asset.storagePath || `${props.title} ${index + 1}`}>
                 <img className="nano-upload-box-preview" alt={props.title} src={asset.url} />
+                <button
+                  type="button"
+                  className="nano-upload-thumb-remove"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    props.onRemoveAsset(asset.id, props.slot);
+                  }}
+                  aria-label={`Remove ${props.title.toLowerCase()} ${index + 1}`}
+                >
+                  <X size={12} strokeWidth={2} aria-hidden="true" />
+                </button>
               </div>
             ))}
             <button
@@ -4513,6 +4574,33 @@ export function ProjectWorkspace(props: {
     } as const;
 
     setWorkspaceNote(labels[slot]);
+  };
+
+  const handleRemoveSelectedAsset = async (
+    assetId: string,
+    slot: 'input' | 'style' | 'brand' | 'source-face' | 'target-scene',
+  ) => {
+    const nextInputAssetIds =
+      slot === 'input' ? photoDirectorInputAssetIds.filter((currentId) => currentId !== assetId) : photoDirectorInputAssetIds;
+
+    if (props.apiConfig?.features.inlineUpload) {
+      try {
+        await api.deleteAsset(assetId);
+      } catch (error) {
+        setWorkspaceNote(error instanceof Error ? error.message : 'Smazani obrazku selhalo.');
+        return;
+      }
+    }
+
+    startTransition(() => {
+      setWorkspace((current) => removeAssetFromWorkspaceState(current, assetId, slot, nextInputAssetIds));
+    });
+
+    if (slot === 'input') {
+      setPhotoDirectorInputAssetIds(nextInputAssetIds);
+    }
+
+    setWorkspaceNote('Obrazek byl odstraneny ze slotu.');
   };
 
   const handleUseVersionAsInput = (versionId: string) => {
@@ -6491,6 +6579,7 @@ export function ProjectWorkspace(props: {
           onHeadswapSourceUpload={handleHeadswapSourceUpload}
           onHeadswapTargetUpload={handleHeadswapTargetUpload}
           onSelectExistingAsset={handleSelectExistingAsset}
+          onRemoveSelectedAsset={handleRemoveSelectedAsset}
           photoDirectorInputAssetIds={photoDirectorInputAssetIds}
           onOutputCountChange={setOutputCount}
           onGenerateAllModels={handleGenerateAllModels}

@@ -177,6 +177,9 @@ export const api = {
   deleteVersion(versionId: string) {
     return fetch(`${API_BASE_URL}/versions/${versionId}`, { method: 'DELETE' });
   },
+  deleteAsset(assetId: string) {
+    return fetch(`${API_BASE_URL}/assets/${assetId}`, { method: 'DELETE' });
+  },
 };
 
 export const setModel = async (modelId: string): Promise<void> => {
